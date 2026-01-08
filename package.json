@@ -1,0 +1,13 @@
+{
+  "name": "parcelpredator",
+  "version": "0.1.0",
+  "description": "ParcelPredator - BDI-based Deliveroo agent scaffold",
+  "type": "module",
+  "main": "src/launcher.js",
+  "scripts": {
+    "start": "node src/launcher.js"
+  },
+  "dependencies": {
+    "@unitn-asa/deliveroo-js-client": "^2.0.2"
+  }
+}
