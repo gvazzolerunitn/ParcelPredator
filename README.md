@@ -1,6 +1,6 @@
 # ParcelPredator
 
-Scaffold minimale per un agente Deliveroo ispirato a ASAPlanners, ma costruito da zero. Struttura pensata per evolvere verso BDI (belief–desire–intention) con planner locale/PDDL.
+Scaffold minimale per un agente Deliveroo. Struttura pensata per evolvere verso BDI (belief–desire–intention) con planner locale/PDDL.
 
 ## Struttura
 - `src/launcher.js`: entrypoint; connette il client Deliveroo, registra callback, crea l'agente.
