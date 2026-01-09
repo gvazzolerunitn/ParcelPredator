@@ -14,9 +14,22 @@ class GoDeliver {
     if (this.parent.carried <= 0) throw new Error("no parcels to deliver");
     const res = await adapter.putdown();
     if (!res) throw new Error("putdown failed");
-    // Reset carried count after delivery
+    
+    // Reset stato dopo consegna
     this.parent.carried = 0;
+    this.parent.carriedReward = 0;
+    
     console.log('Delivered parcels, score updated');
+    
+    // Chiama immediatamente optionsGeneration per decidere il prossimo passo
+    if (this.parent.optionsGeneration) {
+      this.parent.optionsGeneration({
+        me: this.parent,
+        belief: this.parent.belief,
+        grid: this.parent.grid,
+        push: (p) => this.parent.push(p)
+      });
+    }
     return true;
   }
 }
