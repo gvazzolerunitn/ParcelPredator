@@ -6,8 +6,8 @@ class Grid {
     this.accessible = Array.from({ length: width }, () => Array(height).fill(false));
     if (tiles) {
       for (const t of tiles) {
-        // type 0 = wall; altri accessibili
-        this.accessible[t.x][t.y] = t.type !== 0;
+        // type "0" o 0 = wall; altri accessibili
+        this.accessible[t.x][t.y] = t.type != 0 && t.type !== '0';
       }
     }
   }

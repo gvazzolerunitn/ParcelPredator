@@ -10,6 +10,10 @@ const belief = new Belief();
 const me = new Agent();
 let gridRef = null;
 
+// Collega riferimenti all'agente per il loop
+me.belief = belief;
+me.optionsGeneration = optionsGeneration;
+
 // Hook events
 adapter.onConnect(() => console.log("connected"));
 adapter.onDisconnect(() => console.log("disconnected"));
@@ -23,13 +27,18 @@ adapter.onMap((w, h, tiles) => {
   const g = new Grid(w, h, tiles);
   setGrid(g);
   gridRef = g;
-  // Aggiorna spawners/delivery nelle credenze
-  belief.parcelSpawners = tiles.filter(t => t.type === 1).map(t => ({x:t.x,y:t.y}));
-  belief.deliveryZones = tiles.filter(t => t.type === 2).map(t => ({x:t.x,y:t.y}));
+  me.grid = g;
+  // Aggiorna spawners/delivery nelle credenze (type può essere stringa o numero)
+  belief.parcelSpawners = tiles.filter(t => t.type == 1 || t.type === '1').map(t => ({x:t.x,y:t.y}));
+  belief.deliveryZones = tiles.filter(t => t.type == 2 || t.type === '2').map(t => ({x:t.x,y:t.y}));
+  console.log('MAP loaded:', w, 'x', h, '| spawners:', belief.parcelSpawners.length, '| delivery zones:', belief.deliveryZones.length);
 });
 
 adapter.onParcels((parcels) => {
-  parcels.forEach(p => belief.addParcel(p));
+  belief.syncParcels(parcels);
+  // Aggiorna me.carried in base ai pacchi che hanno carriedBy === me.id
+  const carriedByMe = parcels.filter(p => p.carriedBy === me.id);
+  me.carried = carriedByMe.length;
   optionsGeneration({ me, belief, grid: gridRef, push: (p)=>me.push(p) });
 });
 

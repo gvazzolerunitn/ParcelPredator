@@ -14,7 +14,10 @@ class GoPickUp {
     }
     if (this.stopped) throw new Error("stopped");
     const res = await adapter.pickup();
-    if (!res) throw new Error("pickup failed " + id);
+    if (!res || res.length === 0) throw new Error("pickup failed " + id);
+    // Aggiorna il conteggio dei pacchi trasportati
+    this.parent.carried = res.length;
+    console.log('Picked up parcels, now carrying:', this.parent.carried);
     return true;
   }
 }

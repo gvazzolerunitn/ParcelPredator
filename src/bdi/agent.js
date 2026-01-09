@@ -9,6 +9,10 @@ class Agent {
     this.score = 0;
     this.carried = 0;
     this.intentions = [];
+    // Riferimenti esterni impostati dal launcher
+    this.belief = null;
+    this.grid = null;
+    this.optionsGeneration = null;
   }
 
   setValues({ id, name, x, y, score, carried }) {
@@ -30,6 +34,15 @@ class Agent {
       await new Promise(res => setTimeout(res, 100));
     }
     while (true) {
+      // Se idle, genera nuove opzioni
+      if (this.intentions.length === 0 && this.optionsGeneration) {
+        this.optionsGeneration({
+          me: this,
+          belief: this.belief,
+          grid: this.grid,
+          push: (p) => this.push(p)
+        });
+      }
       if (this.intentions.length > 0) {
         const intention = this.intentions[0];
         try {

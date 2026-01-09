@@ -14,6 +14,9 @@ class GoDeliver {
     if (this.parent.carried <= 0) throw new Error("no parcels to deliver");
     const res = await adapter.putdown();
     if (!res) throw new Error("putdown failed");
+    // Reset carried count after delivery
+    this.parent.carried = 0;
+    console.log('Delivered parcels, score updated');
     return true;
   }
 }
