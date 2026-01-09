@@ -9,7 +9,7 @@ class GoDeliver {
     if (this.stopped) throw new Error("stopped");
     const mover = new MoveBfs(this.parent);
     if (Math.round(this.parent.x) !== Math.round(x) || Math.round(this.parent.y) !== Math.round(y)) {
-      await mover.execute('go_to', x, y);
+      await mover.execute('go_to', x, y, this.parent.belief);
     }
     if (this.parent.carried <= 0) throw new Error("no parcels to deliver");
     const res = await adapter.putdown();

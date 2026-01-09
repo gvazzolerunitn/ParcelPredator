@@ -10,7 +10,7 @@ class GoPickUp {
     // muovi verso il pacco se non sei già sopra
     const mover = new MoveBfs(this.parent);
     if (Math.round(this.parent.x) !== Math.round(x) || Math.round(this.parent.y) !== Math.round(y)) {
-      await mover.execute('go_to', x, y);
+      await mover.execute('go_to', x, y, this.parent.belief);
     }
     if (this.stopped) throw new Error("stopped");
     const res = await adapter.pickup();

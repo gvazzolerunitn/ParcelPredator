@@ -1,6 +1,7 @@
 // optionsGeneration: produce intenzioni candidate con scoring multi-pick
 // Versione 3: supporta batch pickup + agent avoidance/contention handling
 import { grid as globalGrid } from "../utils/grid.js";
+import { isTargetInCooldown } from "./plans/moveBfs.js";
 
 // ============================================================================
 // STATO per backoff esplorazione spawner
@@ -55,21 +56,25 @@ function getContentionPenalty(parcel, myX, myY, otherAgents, g) {
 /**
  * Ritorna i K pacchi liberi più vicini, ordinati per distanza da (x,y)
  * Include info sulla contention con altri agenti
+ * Filtra i pacchi in cooldown (target falliti di recente)
  */
 function getNearbyFreeParcels(belief, x, y, g, myId, K = 10) {
   const parcels = belief.getFreeParcels();
   const otherAgents = belief.getOtherAgents(myId);
   
-  const withDist = parcels.map(p => {
-    const dist = g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y));
-    const contention = getContentionPenalty(p, x, y, otherAgents, g);
-    return {
-      ...p,
-      dist,
-      contested: contention.contested,
-      contentionPenalty: contention.penalty
-    };
-  });
+  const withDist = parcels
+    // Filtra pacchi in cooldown
+    .filter(p => !isTargetInCooldown(p.x, p.y))
+    .map(p => {
+      const dist = g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y));
+      const contention = getContentionPenalty(p, x, y, otherAgents, g);
+      return {
+        ...p,
+        dist,
+        contested: contention.contested,
+        contentionPenalty: contention.penalty
+      };
+    });
   
   // Ordina per distanza, ma i pacchi fortemente contested vanno in fondo
   withDist.sort((a, b) => {
@@ -146,14 +151,28 @@ function chooseBestSpawner(spawners, myX, myY, otherAgents, g) {
 
 /**
  * Trova la delivery zone più vicina a (x,y)
+ * Preferisce zone non in cooldown, ma se tutte lo sono, sceglie la più vicina comunque
  */
 function findNearestDelivery(x, y, deliveryZones, g) {
-  let best = null;
-  let bestDist = Infinity;
+  let bestNotCooled = null;
+  let bestNotCooledDist = Infinity;
+  let bestAny = null;
+  let bestAnyDist = Infinity;
+  
   for (const d of deliveryZones) {
     const dist = g.manhattanDistance(x, y, d.x, d.y);
-    if (dist < bestDist) { bestDist = dist; best = d; }
+    // Track best overall
+    if (dist < bestAnyDist) { bestAnyDist = dist; bestAny = d; }
+    // Track best not in cooldown
+    if (!isTargetInCooldown(d.x, d.y) && dist < bestNotCooledDist) { 
+      bestNotCooledDist = dist; 
+      bestNotCooled = d; 
+    }
   }
+  
+  // Preferisci non-cooled, fallback a qualsiasi
+  const best = bestNotCooled || bestAny;
+  const bestDist = bestNotCooled ? bestNotCooledDist : bestAnyDist;
   return { zone: best, dist: bestDist };
 }
 

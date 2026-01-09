@@ -21,7 +21,15 @@ class Grid {
     return Math.abs(Math.round(x1) - Math.round(x2)) + Math.abs(Math.round(y1) - Math.round(y2));
   }
 
-  bfsPath(sx, sy, tx, ty) {
+  /**
+   * BFS pathfinding con supporto per celle bloccate (agenti)
+   * @param {number} sx - start x
+   * @param {number} sy - start y
+   * @param {number} tx - target x
+   * @param {number} ty - target y
+   * @param {Set<string>} blockedCells - opzionale, set di "x,y" da evitare (posizioni agenti)
+   */
+  bfsPath(sx, sy, tx, ty, blockedCells = null) {
     sx = Math.round(sx); sy = Math.round(sy); tx = Math.round(tx); ty = Math.round(ty);
     if (!this.isAccessible(tx, ty) || !this.isAccessible(sx, sy)) return null;
     // In Deliveroo: up = y+1, down = y-1, right = x+1, left = x-1
@@ -37,6 +45,8 @@ class Grid {
         const nx = x+dx, ny = y+dy;
         const k = key(nx,ny);
         if (!this.isAccessible(nx,ny) || prev.has(k)) continue;
+        // Evita celle bloccate da agenti (ma permetti la destinazione)
+        if (blockedCells && blockedCells.has(k) && !(nx === tx && ny === ty)) continue;
         prev.set(k, [x,y,name]);
         q.push([nx,ny]);
       }
