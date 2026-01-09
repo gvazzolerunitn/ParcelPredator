@@ -1,5 +1,4 @@
-// optionsGeneration: produce intenzioni candidate
-// Per ora versione minimale: se vede un pacco non raccolto, punta a quello; se trasporta pacchi e vede delivery, consegna; altrimenti random.
+// optionsGeneration: produce intenzioni candidate con scoring multi-pick
 import { grid as globalGrid } from "../utils/grid.js";
 
 function optionsGeneration({ me, belief, grid, push }) {
@@ -8,43 +7,90 @@ function optionsGeneration({ me, belief, grid, push }) {
 
   const parcels = belief.getFreeParcels();
   const deliveryZones = belief.deliveryZones;
+  const loss = me.lossForMovement || 0;
 
-  // Se c'e' gia' un'intenzione, interrompi solo se e' go_random e c'e' un pacco o devo consegnare
+  // Se c'è già un'intenzione utile in corso, non interrompere (tranne go_random)
   if (me.intentions.length > 0) {
     const current = me.intentions[0]?.predicate?.[0];
-    // Se sto gia' facendo qualcosa di utile, non interrompere
     if (current !== 'go_random') return;
-    // Se go_random ma non c'e' nulla di meglio, lascia stare
     if (me.carried === 0 && parcels.length === 0) return;
-    // Altrimenti interrompi go_random
     me.intentions[0]?.stop?.();
     me.intentions.shift();
   }
 
-  // Debug log
-  console.log('options: carried=', me.carried, 'parcels=', parcels.length, 'deliveryZones=', deliveryZones.length);
+  console.log('options: carried=', me.carried, '/', me.capacity, 'carriedReward=', me.carriedReward, 'parcels=', parcels.length);
 
-  // Se sto trasportando, consegna verso delivery piu' vicino
-  if (me.carried > 0 && deliveryZones.length > 0) {
-    const target = deliveryZones
-      .map(d => ({ d, dist: g.manhattanDistance(me.x, me.y, d.x, d.y) }))
-      .sort((a,b)=>a.dist-b.dist)[0].d;
-    console.log('-> go_deliver to', target.x, target.y);
-    push(['go_deliver', target.x, target.y, 'deliver', 0]);
+  // Trova delivery zone più vicina (per calcoli)
+  let nearestDelivery = null;
+  let distToDelivery = Infinity;
+  if (deliveryZones.length > 0) {
+    for (const d of deliveryZones) {
+      const dist = g.manhattanDistance(me.x, me.y, d.x, d.y);
+      if (dist < distToDelivery) { distToDelivery = dist; nearestDelivery = d; }
+    }
+  }
+
+  // Costruisci opzioni con score
+  const options = [];
+
+  // Opzione DELIVER: se trasporto pacchi
+  if (me.carried > 0 && nearestDelivery) {
+    const moveCost = distToDelivery * loss * me.carried;
+    const deliverScore = me.carriedReward - moveCost;
+    if (deliverScore > 0) {
+      options.push({ type: 'go_deliver', x: nearestDelivery.x, y: nearestDelivery.y, score: deliverScore });
+    }
+  }
+
+  // Opzioni PICKUP: se ho ancora capacità
+  if (me.carried < me.capacity && parcels.length > 0) {
+    for (const p of parcels) {
+      const distToParcel = g.manhattanDistance(me.x, me.y, Math.round(p.x), Math.round(p.y));
+      // Distanza dal pacco alla delivery più vicina
+      let distParcelToDelivery = Infinity;
+      for (const d of deliveryZones) {
+        const dd = g.manhattanDistance(Math.round(p.x), Math.round(p.y), d.x, d.y);
+        if (dd < distParcelToDelivery) distParcelToDelivery = dd;
+      }
+      // Score = reward netto dopo aver preso il pacco e consegnato tutto
+      const futureLoss = (distToParcel + distParcelToDelivery) * loss * (me.carried + 1);
+      const pickupScore = (me.carriedReward + (p.reward || 0)) - futureLoss;
+      if (pickupScore > 0) {
+        options.push({ type: 'go_pick_up', x: Math.round(p.x), y: Math.round(p.y), id: p.id, reward: p.reward || 0, score: pickupScore });
+      }
+    }
+  }
+
+  // Ordina per score decrescente
+  options.sort((a, b) => b.score - a.score);
+
+  if (options.length > 0) {
+    const best = options[0];
+    if (best.type === 'go_deliver') {
+      console.log('-> go_deliver to', best.x, best.y, 'score=', best.score.toFixed(2));
+      push(['go_deliver', best.x, best.y, 'deliver', best.score]);
+    } else {
+      console.log('-> go_pick_up', best.id, 'at', best.x, best.y, 'score=', best.score.toFixed(2));
+      push(['go_pick_up', best.x, best.y, best.id, best.score]);
+    }
     return;
   }
 
-  // Se c'è almeno un pacco, scegli il più vicino per Manhattan
-  if (parcels.length > 0) {
-    const p = parcels
-      .map(p => ({ p, dist: g.manhattanDistance(me.x, me.y, p.x, p.y) }))
-      .sort((a,b)=>a.dist-b.dist)[0].p;
-    console.log('-> go_pick_up', p.id, 'at', p.x, p.y);
-    push(['go_pick_up', Math.round(p.x), Math.round(p.y), p.id, p.reward || 0]);
+  // Se ho pacchi ma nessuna opzione valida (score negativo), consegna comunque per non perderli
+  if (me.carried > 0 && nearestDelivery) {
+    console.log('-> go_deliver (fallback, no positive options)');
+    push(['go_deliver', nearestDelivery.x, nearestDelivery.y, 'deliver', 0]);
     return;
   }
 
-  // fallback random
+  // Fallback: vai verso spawner o random
+  if (belief.parcelSpawners && belief.parcelSpawners.length > 0) {
+    const spawner = belief.parcelSpawners[Math.floor(Math.random() * belief.parcelSpawners.length)];
+    console.log('-> go_to spawner', spawner.x, spawner.y);
+    push(['go_pick_up', spawner.x, spawner.y, 'explore', 0]);
+    return;
+  }
+
   console.log('-> go_random');
   push(['go_random', me.x ?? 0, me.y ?? 0, 'rnd', 0]);
 }

@@ -36,9 +36,10 @@ adapter.onMap((w, h, tiles) => {
 
 adapter.onParcels((parcels) => {
   belief.syncParcels(parcels);
-  // Aggiorna me.carried in base ai pacchi che hanno carriedBy === me.id
+  // Aggiorna me.carried e carriedReward in base ai pacchi che hanno carriedBy === me.id
   const carriedByMe = parcels.filter(p => p.carriedBy === me.id);
   me.carried = carriedByMe.length;
+  me.carriedReward = carriedByMe.reduce((sum, p) => sum + (p.reward || 0), 0);
   optionsGeneration({ me, belief, grid: gridRef, push: (p)=>me.push(p) });
 });
 
@@ -48,6 +49,18 @@ adapter.onAgents((agents) => {
 
 adapter.onConfig((cfg) => {
   console.log("server config", cfg);
+  // Calcola lossForMovement in base a decay e velocità movimento
+  let lossPerSecond = 0;
+  if (cfg.PARCEL_DECADING_INTERVAL && cfg.PARCEL_DECADING_INTERVAL !== 'infinite') {
+    const ms = parseInt(cfg.PARCEL_DECADING_INTERVAL.replace('s','').replace('ms',''));
+    lossPerSecond = cfg.PARCEL_DECADING_INTERVAL.includes('ms') ? 1000/ms : 1/ms;
+  }
+  let movesPerSecond = 1;
+  if (cfg.MOVEMENT_DURATION) {
+    movesPerSecond = 1000 / cfg.MOVEMENT_DURATION;
+  }
+  me.lossForMovement = lossPerSecond / movesPerSecond;
+  console.log('lossForMovement:', me.lossForMovement);
 });
 
 // Avvia loop dell'agente

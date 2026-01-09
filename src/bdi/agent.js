@@ -8,11 +8,15 @@ class Agent {
     this.y = undefined;
     this.score = 0;
     this.carried = 0;
+    this.carriedReward = 0;       // Somma reward dei pacchi trasportati
     this.intentions = [];
     // Riferimenti esterni impostati dal launcher
     this.belief = null;
     this.grid = null;
     this.optionsGeneration = null;
+    // Parametri per scoring multi-pick
+    this.capacity = 4;            // Numero max pacchi trasportabili
+    this.lossForMovement = 0;     // Perdita reward per movimento (calcolato da config server)
   }
 
   setValues({ id, name, x, y, score, carried }) {
