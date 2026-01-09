@@ -13,6 +13,7 @@ let gridRef = null;
 // Collega riferimenti all'agente per il loop
 me.belief = belief;
 me.optionsGeneration = optionsGeneration;
+me.carried_parcels = []; // Lista dei pacchi trasportati {id, reward}
 
 // Hook events
 adapter.onConnect(() => console.log("connected"));
@@ -60,7 +61,9 @@ adapter.onConfig((cfg) => {
     movesPerSecond = 1000 / cfg.MOVEMENT_DURATION;
   }
   me.lossForMovement = lossPerSecond / movesPerSecond;
-  console.log('lossForMovement:', me.lossForMovement);
+  me.lossForSecond = lossPerSecond;
+  belief.setLossForSecond(lossPerSecond); // Imposta loss rate nel belief per decay
+  console.log('lossForMovement:', me.lossForMovement, '| lossForSecond:', lossPerSecond);
 });
 
 // Avvia loop dell'agente

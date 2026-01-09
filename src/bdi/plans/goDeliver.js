@@ -12,14 +12,26 @@ class GoDeliver {
       await mover.execute('go_to', x, y, this.parent.belief);
     }
     if (this.parent.carried <= 0) throw new Error("no parcels to deliver");
+
+    // Cattura gli ID dei pacchi che stiamo per consegnare (evita race con onParcels)
+    const deliveredIdsArr = (this.parent.carried_parcels || []).map(p => p.id);
+    const deliveredCount = deliveredIdsArr.length;
+
     const res = await adapter.putdown();
     if (!res) throw new Error("putdown failed");
-    
+
+    // Rimuovi dalla belief eventuali record residui dei pacchi consegnati
+    for (const id of deliveredIdsArr) {
+      try { this.parent.belief.removeParcel(id); } catch (e) { /* ignore */ }
+    }
+
     // Reset stato dopo consegna
+    const deliveredIds = deliveredIdsArr.join(',');
     this.parent.carried = 0;
     this.parent.carriedReward = 0;
-    
-    console.log('Delivered parcels, score updated');
+    this.parent.carried_parcels = [];
+
+    console.log('Delivered', deliveredCount, 'parcels | IDs:', deliveredIds);
     
     // Chiama immediatamente optionsGeneration per decidere il prossimo passo
     if (this.parent.optionsGeneration) {

@@ -1,39 +1,159 @@
-// Stato minimo delle credenze: parcels, agents, spawners, delivery zones
+// Stato delle credenze con timestamps, decay e expiry
+// Ispirato a ASAPlanners per gestione realistica delle informazioni
 class Belief {
   constructor() {
-    this.parcels = new Map(); // id -> {id,x,y,reward,carriedBy}
-    this.agents = new Map(); // id -> {id,name,x,y,score}
+    this.parcels = new Map(); // id -> {id,x,y,reward,carriedBy,timestamp,observedReward}
+    this.agents = new Map();  // id -> {id,name,x,y,score,timestamp}
     this.parcelSpawners = [];
     this.deliveryZones = [];
+    this.startTime = Date.now();
+    this.lossForSecond = 1; // Verrà aggiornato dal launcher con il valore del server
   }
-  // Sincronizza i pacchi: sostituisce tutti con quelli del sensing
+
+  // Imposta il loss rate (chiamato dal launcher dopo onConfig)
+  setLossForSecond(loss) {
+    this.lossForSecond = loss;
+  }
+
+  // Sincronizza i pacchi: aggiorna quelli visti con nuovo timestamp
   syncParcels(parcelsArray) {
-    this.parcels.clear();
+    const now = Date.now();
+    // Aggiorna o aggiungi i pacchi visti
     for (const p of parcelsArray) {
-      this.parcels.set(p.id, p);
+      this.parcels.set(p.id, {
+        id: p.id,
+        x: Math.round(p.x),
+        y: Math.round(p.y),
+        reward: p.reward,
+        observedReward: p.reward,
+        carriedBy: p.carriedBy,
+        timestamp: now
+      });
     }
+    // Rimuovi pacchi expired (non visti da troppo tempo o con reward decaduto)
+    this.checkExpiredParcels();
   }
-  addParcel(p) { this.parcels.set(p.id, p); }
+
+  addParcel(p) { 
+    this.parcels.set(p.id, {
+      ...p,
+      x: Math.round(p.x),
+      y: Math.round(p.y),
+      observedReward: p.reward,
+      timestamp: Date.now()
+    }); 
+  }
+
   removeParcel(id) { this.parcels.delete(id); }
-  // Restituisce solo i pacchi liberi (non trasportati)
-  getFreeParcels() {
-    return Array.from(this.parcels.values()).filter(p => 
-      p.carriedBy === null || p.carriedBy === undefined || p.carriedBy === ''
-    );
-  }
-  getParcelsArray() { return Array.from(this.parcels.values()); }
-  addAgent(a) { this.agents.set(a.id, a); }
-  getAgent(id) { return this.agents.get(id); }
-  // Ritorna tutti gli agenti tranne quello con id specificato
-  getOtherAgents(myId) {
-    return Array.from(this.agents.values()).filter(a => a.id !== myId);
-  }
-  // Sincronizza agenti: sostituisce tutti con quelli del sensing
-  syncAgents(agentsArray) {
-    this.agents.clear();
-    for (const a of agentsArray) {
-      this.agents.set(a.id, a);
+
+  /**
+   * Rimuove pacchi scaduti:
+   * - Non visti da più di 2000ms
+   * - Con reward stimato <= 0 (decay li ha esauriti)
+   */
+  checkExpiredParcels(carriedParcels = null) {
+    const now = Date.now();
+    const toRemove = [];
+    
+    for (const [id, parcel] of this.parcels) {
+      const elapsed = now - parcel.timestamp;
+      const decayLoss = (elapsed / 1000) * this.lossForSecond;
+      const estimatedReward = parcel.observedReward - decayLoss;
+      
+      // Scade se troppo vecchio (2s) o reward stimato <= 0
+      if (elapsed >= 2000 || estimatedReward <= 0) {
+        toRemove.push(id);
+        // Se l'agente sta trasportando questo pacco, rimuovilo dalla lista
+        if (carriedParcels) {
+          const idx = carriedParcels.findIndex(cp => cp.id === id);
+          if (idx !== -1) {
+            console.log(`Removing expired carried parcel ${id}`);
+            carriedParcels.splice(idx, 1);
+          }
+        }
+      }
     }
+    
+    for (const id of toRemove) {
+      this.parcels.delete(id);
+    }
+  }
+
+  /**
+   * Restituisce i pacchi liberi con reward stimato attuale
+   * Considera il decay dal momento dell'osservazione
+   */
+  getFreeParcels() {
+    this.checkExpiredParcels();
+    const now = Date.now();
+    
+    return Array.from(this.parcels.values())
+      .filter(p => p.carriedBy === null || p.carriedBy === undefined || p.carriedBy === '')
+      .map(p => {
+        const elapsed = now - p.timestamp;
+        const decayLoss = (elapsed / 1000) * this.lossForSecond;
+        const estimatedReward = Math.max(0, p.observedReward - decayLoss);
+        return {
+          ...p,
+          reward: estimatedReward // Reward stimato attuale
+        };
+      })
+      .filter(p => p.reward > 0); // Escludi pacchi con reward 0
+  }
+
+  getParcelsArray() { return Array.from(this.parcels.values()); }
+
+  // Sincronizza agenti con timestamp
+  syncAgents(agentsArray) {
+    const now = Date.now();
+    for (const a of agentsArray) {
+      this.agents.set(a.id, {
+        id: a.id,
+        name: a.name,
+        x: Math.round(a.x),
+        y: Math.round(a.y),
+        score: a.score,
+        timestamp: now
+      });
+    }
+    this.checkExpiredAgents();
+  }
+
+  addAgent(a) { 
+    this.agents.set(a.id, {
+      ...a,
+      x: Math.round(a.x),
+      y: Math.round(a.y),
+      timestamp: Date.now()
+    }); 
+  }
+
+  getAgent(id) { return this.agents.get(id); }
+
+  /**
+   * Rimuove agenti non visti da più di 500ms
+   */
+  checkExpiredAgents() {
+    const now = Date.now();
+    const toRemove = [];
+    
+    for (const [id, agent] of this.agents) {
+      if (now - agent.timestamp >= 500) {
+        toRemove.push(id);
+      }
+    }
+    
+    for (const id of toRemove) {
+      this.agents.delete(id);
+    }
+  }
+
+  /**
+   * Ritorna tutti gli agenti (non expired) tranne quello con id specificato
+   */
+  getOtherAgents(myId) {
+    this.checkExpiredAgents();
+    return Array.from(this.agents.values()).filter(a => a.id !== myId);
   }
 }
 

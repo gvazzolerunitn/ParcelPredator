@@ -24,16 +24,21 @@ class GoPickUp {
       throw new Error("pickup failed " + id);
     }
     
-    // Aggiorna stato agente
-    this.parent.carried = res.length;
-    this.parent.carriedReward = res.reduce((sum, p) => sum + (p.reward || 0), 0);
-    
-    // Rimuovi i pacchi raccolti dalla belief (non sono più liberi)
+    // Aggiorna stato agente — integra i pacchi appena raccolti nella lista di quelli trasportati
+    // (adapter.pickup potrebbe ritornare solo i pacchi raccolti in questa azione)
+    this.parent.carried_parcels = this.parent.carried_parcels || [];
     for (const p of res) {
+      if (!this.parent.carried_parcels.some(cp => cp.id === p.id)) {
+        this.parent.carried_parcels.push({ id: p.id, reward: p.reward || 0 });
+      }
+      // Rimuovi il pacco dalla belief (non è più disponibile sulla mappa)
       this.parent.belief.removeParcel(p.id);
     }
-    
-    console.log('Picked up parcels, now carrying:', this.parent.carried);
+    // Aggiorna i contatori basati sulla lista cumulativa
+    this.parent.carried = this.parent.carried_parcels.length;
+    this.parent.carriedReward = this.parent.carried_parcels.reduce((sum, p) => sum + (p.reward || 0), 0);
+
+    console.log('Picked up parcels, now carrying:', this.parent.carried, '| IDs:', this.parent.carried_parcels.map(p => p.id).join(','));
     
     // Chiama immediatamente optionsGeneration per decidere il prossimo passo
     if (this.parent.optionsGeneration) {
