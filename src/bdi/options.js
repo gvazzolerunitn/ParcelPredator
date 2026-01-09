@@ -1,22 +1,147 @@
 // optionsGeneration: produce intenzioni candidate con scoring multi-pick
-// Versione 2: supporta batch pickup (raccoglie più pacchi prima di consegnare)
+// Versione 3: supporta batch pickup + agent avoidance/contention handling
 import { grid as globalGrid } from "../utils/grid.js";
 
 // ============================================================================
-// HELPERS per Multi-Pick
+// STATO per backoff esplorazione spawner
+// ============================================================================
+const recentlyVisitedSpawners = new Map(); // key: "x,y" -> timestamp ultimo tentativo
+const SPAWNER_BACKOFF_MS = 3000; // Non tornare sullo stesso spawner per 3 secondi
+
+// ============================================================================
+// HELPERS per Multi-Pick e Agent Avoidance
 // ============================================================================
 
 /**
- * Ritorna i K pacchi liberi più vicini, ordinati per distanza da (x,y)
+ * Calcola la penalità di contention per un pacco.
+ * Ritorna { contested: bool, penalty: number (0-1, dove 1 = nessuna penalità) }
  */
-function getNearbyFreeParcels(belief, x, y, g, K = 10) {
+function getContentionPenalty(parcel, myX, myY, otherAgents, g) {
+  const px = Math.round(parcel.x);
+  const py = Math.round(parcel.y);
+  const myDist = g.manhattanDistance(myX, myY, px, py);
+  
+  let minOtherDist = Infinity;
+  for (const agent of otherAgents) {
+    const agentDist = g.manhattanDistance(agent.x, agent.y, px, py);
+    if (agentDist < minOtherDist) {
+      minOtherDist = agentDist;
+    }
+  }
+  
+  // Nessun altro agente -> nessuna contention
+  if (minOtherDist === Infinity) {
+    return { contested: false, penalty: 1.0 };
+  }
+  
+  // Altro agente è più vicino -> fortemente contested
+  if (minOtherDist < myDist) {
+    return { contested: true, penalty: 0.1 };
+  }
+  
+  // Stessa distanza -> moderatamente contested
+  if (minOtherDist === myDist) {
+    return { contested: true, penalty: 0.5 };
+  }
+  
+  // Sono più vicino io -> leggera penalità se l'altro è molto vicino
+  if (minOtherDist <= myDist + 2) {
+    return { contested: false, penalty: 0.8 };
+  }
+  
+  return { contested: false, penalty: 1.0 };
+}
+
+/**
+ * Ritorna i K pacchi liberi più vicini, ordinati per distanza da (x,y)
+ * Include info sulla contention con altri agenti
+ */
+function getNearbyFreeParcels(belief, x, y, g, myId, K = 10) {
   const parcels = belief.getFreeParcels();
-  const withDist = parcels.map(p => ({
-    ...p,
-    dist: g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y))
-  }));
-  withDist.sort((a, b) => a.dist - b.dist);
+  const otherAgents = belief.getOtherAgents(myId);
+  
+  const withDist = parcels.map(p => {
+    const dist = g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y));
+    const contention = getContentionPenalty(p, x, y, otherAgents, g);
+    return {
+      ...p,
+      dist,
+      contested: contention.contested,
+      contentionPenalty: contention.penalty
+    };
+  });
+  
+  // Ordina per distanza, ma i pacchi fortemente contested vanno in fondo
+  withDist.sort((a, b) => {
+    // Prima i non-contested, poi per distanza
+    if (a.contested !== b.contested) return a.contested ? 1 : -1;
+    return a.dist - b.dist;
+  });
+  
   return withDist.slice(0, K);
+}
+
+/**
+ * Sceglie lo spawner migliore evitando zone con altri agenti e spawner visitati di recente
+ */
+function chooseBestSpawner(spawners, myX, myY, otherAgents, g) {
+  if (spawners.length === 0) return null;
+  
+  const now = Date.now();
+  let bestSpawner = null;
+  let bestScore = -Infinity;
+  
+  for (const spawner of spawners) {
+    // Salta spawner visitati di recente (backoff)
+    const key = `${spawner.x},${spawner.y}`;
+    const lastVisit = recentlyVisitedSpawners.get(key);
+    if (lastVisit && (now - lastVisit) < SPAWNER_BACKOFF_MS) {
+      continue; // Ancora in backoff
+    }
+    
+    const myDist = g.manhattanDistance(myX, myY, spawner.x, spawner.y);
+    
+    // Trova la distanza minima di altri agenti da questo spawner
+    let minOtherDist = Infinity;
+    for (const agent of otherAgents) {
+      const agentDist = g.manhattanDistance(agent.x, agent.y, spawner.x, spawner.y);
+      if (agentDist < minOtherDist) {
+        minOtherDist = agentDist;
+      }
+    }
+    
+    // Score: preferisci spawner vicini a me ma lontani da altri agenti
+    // score = (distanza altri) - (distanza mia) * 0.5
+    const score = (minOtherDist === Infinity ? 20 : minOtherDist) - myDist * 0.5;
+    
+    if (score > bestScore) {
+      bestScore = score;
+      bestSpawner = spawner;
+    }
+  }
+  
+  // Se tutti gli spawner sono in backoff, scegli quello con backoff più vecchio
+  if (!bestSpawner && spawners.length > 0) {
+    let oldestKey = null;
+    let oldestTime = Infinity;
+    for (const spawner of spawners) {
+      const key = `${spawner.x},${spawner.y}`;
+      const lastVisit = recentlyVisitedSpawners.get(key) || 0;
+      if (lastVisit < oldestTime) {
+        oldestTime = lastVisit;
+        oldestKey = key;
+        bestSpawner = spawner;
+      }
+    }
+  }
+  
+  // Registra questo spawner come visitato
+  if (bestSpawner) {
+    const key = `${bestSpawner.x},${bestSpawner.y}`;
+    recentlyVisitedSpawners.set(key, now);
+  }
+  
+  return { spawner: bestSpawner, nearbyAgents: otherAgents.length };
 }
 
 /**
@@ -40,10 +165,10 @@ function findNearestDelivery(x, y, deliveryZones, g) {
  * - me: agente (per me.carried, me.carriedReward, me.lossForMovement)
  * - g: griglia per calcolo distanze
  * 
- * Ritorna { totalReward, totalCost, netScore, deliveryZone, segments }
+ * Ritorna { totalReward, totalCost, netScore, deliveryZone, segments, avgContentionPenalty }
  */
 function evaluateRoute(start, sequence, deliveryZones, me, g) {
-  if (sequence.length === 0) return { totalReward: 0, totalCost: 0, netScore: -Infinity, deliveryZone: null, segments: [] };
+  if (sequence.length === 0) return { totalReward: 0, totalCost: 0, netScore: -Infinity, deliveryZone: null, segments: [], avgContentionPenalty: 1 };
 
   const loss = me.lossForMovement || 0;
   let pos = { x: start.x, y: start.y };
@@ -51,6 +176,7 @@ function evaluateRoute(start, sequence, deliveryZones, me, g) {
   let totalReward = me.carriedReward; // reward già accumulato
   let totalCost = 0;
   const segments = [];
+  let totalContentionPenalty = 0;
 
   // Segmenti di pickup
   for (const parcel of sequence) {
@@ -61,22 +187,28 @@ function evaluateRoute(start, sequence, deliveryZones, me, g) {
     const segmentCost = segmentDist * loss * carried;
     totalCost += segmentCost;
     segments.push({ from: { ...pos }, to: { x: px, y: py }, dist: segmentDist, carried, cost: segmentCost });
+    // Accumula penalità contention
+    totalContentionPenalty += (parcel.contentionPenalty || 1);
     // Dopo il pickup: incrementa carried e reward
     carried++;
     totalReward += (parcel.reward || 0);
     pos = { x: px, y: py };
   }
+  
+  const avgContentionPenalty = totalContentionPenalty / sequence.length;
 
   // Segmento finale: dal ultimo pacco alla delivery zone più vicina
   const { zone: deliveryZone, dist: deliveryDist } = findNearestDelivery(pos.x, pos.y, deliveryZones, g);
-  if (!deliveryZone) return { totalReward: 0, totalCost: Infinity, netScore: -Infinity, deliveryZone: null, segments };
+  if (!deliveryZone) return { totalReward: 0, totalCost: Infinity, netScore: -Infinity, deliveryZone: null, segments, avgContentionPenalty: 1 };
 
   const deliveryCost = deliveryDist * loss * carried;
   totalCost += deliveryCost;
   segments.push({ from: { ...pos }, to: { x: deliveryZone.x, y: deliveryZone.y }, dist: deliveryDist, carried, cost: deliveryCost });
 
-  const netScore = totalReward - totalCost;
-  return { totalReward, totalCost, netScore, deliveryZone, segments };
+  // Applica penalità contention al punteggio finale
+  const baseScore = totalReward - totalCost;
+  const netScore = baseScore * avgContentionPenalty;
+  return { totalReward, totalCost, netScore, deliveryZone, segments, avgContentionPenalty };
 }
 
 /**
@@ -140,11 +272,15 @@ function optionsGeneration({ me, belief, grid, push }) {
   // Trova delivery zone più vicina dalla posizione attuale
   const { zone: nearestDelivery, dist: distToDelivery } = findNearestDelivery(me.x, me.y, deliveryZones, g);
 
-  // Prendi i K pacchi più vicini
+  // Prendi i K pacchi più vicini (con info contention)
   const K = 10;
-  const nearbyCandidates = getNearbyFreeParcels(belief, me.x, me.y, g, K);
+  const nearbyCandidates = getNearbyFreeParcels(belief, me.x, me.y, g, me.id, K);
+  const contestedCount = nearbyCandidates.filter(p => p.contested).length;
+  const otherAgents = belief.getOtherAgents(me.id);
 
-  console.log('options: carried=', me.carried, '/', capacity, 'carriedReward=', me.carriedReward, 'parcels=', nearbyCandidates.length);
+  console.log('options: carried=', me.carried, '/', capacity, 'carriedReward=', me.carriedReward, 
+    'parcels=', nearbyCandidates.length, contestedCount > 0 ? `(${contestedCount} contested)` : '', 
+    'agents=', otherAgents.length);
 
   // -------------------------------------------------------------------------
   // OPZIONE 1: DELIVER ORA (se ho pacchi)
@@ -210,12 +346,15 @@ function optionsGeneration({ me, belief, grid, push }) {
     return;
   }
 
-  // Caso D: nessun pacco trasportato e nessuna rotta valida -> esplora spawner
+  // Caso D: nessun pacco trasportato e nessuna rotta valida -> esplora spawner (evitando altri agenti)
   if (belief.parcelSpawners && belief.parcelSpawners.length > 0) {
-    const spawner = belief.parcelSpawners[Math.floor(Math.random() * belief.parcelSpawners.length)];
-    console.log('-> go_to spawner', spawner.x, spawner.y);
-    push(['go_pick_up', spawner.x, spawner.y, 'explore', 0]);
-    return;
+    const result = chooseBestSpawner(belief.parcelSpawners, me.x, me.y, otherAgents, g);
+    if (result && result.spawner) {
+      const avoidMsg = result.nearbyAgents > 0 ? ` (avoiding ${result.nearbyAgents} agents)` : '';
+      console.log('-> go_to spawner', result.spawner.x, result.spawner.y + avoidMsg);
+      push(['go_pick_up', result.spawner.x, result.spawner.y, 'explore', 0]);
+      return;
+    }
   }
 
   // Caso E: fallback totale

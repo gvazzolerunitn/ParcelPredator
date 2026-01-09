@@ -14,7 +14,15 @@ class GoPickUp {
     }
     if (this.stopped) throw new Error("stopped");
     const res = await adapter.pickup();
-    if (!res || res.length === 0) throw new Error("pickup failed " + id);
+    
+    // Se è un'esplorazione (id='explore') e non c'è niente, non è un errore
+    if (!res || res.length === 0) {
+      if (id === 'explore') {
+        // Esplorazione senza pacchi: normale, non loggare come errore
+        return false;
+      }
+      throw new Error("pickup failed " + id);
+    }
     
     // Aggiorna stato agente
     this.parent.carried = res.length;

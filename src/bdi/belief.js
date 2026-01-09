@@ -24,6 +24,17 @@ class Belief {
   getParcelsArray() { return Array.from(this.parcels.values()); }
   addAgent(a) { this.agents.set(a.id, a); }
   getAgent(id) { return this.agents.get(id); }
+  // Ritorna tutti gli agenti tranne quello con id specificato
+  getOtherAgents(myId) {
+    return Array.from(this.agents.values()).filter(a => a.id !== myId);
+  }
+  // Sincronizza agenti: sostituisce tutti con quelli del sensing
+  syncAgents(agentsArray) {
+    this.agents.clear();
+    for (const a of agentsArray) {
+      this.agents.set(a.id, a);
+    }
+  }
 }
 
 export { Belief };

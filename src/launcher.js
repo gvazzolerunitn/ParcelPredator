@@ -44,7 +44,7 @@ adapter.onParcels((parcels) => {
 });
 
 adapter.onAgents((agents) => {
-  agents.forEach(a => belief.addAgent(a));
+  belief.syncAgents(agents);
 });
 
 adapter.onConfig((cfg) => {
