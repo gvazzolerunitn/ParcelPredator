@@ -50,3 +50,36 @@
 ## Current status
 - Implemented (prototype): belief aging, multi-pick scoring, agent-aware BFS, exponential backoff, target cooldown, spawner backoff, `carried_parcels` handling, immediate belief updates after actions.
 - Pending (recommended next steps): alternate-route fallback in `moveBfs`, unit tests and benchmark harness, hyperparameter tuning.
+
+## Quick Start
+
+- Install dependencies:
+
+```bash
+npm install
+```
+
+- (Optional) To use the online PDDL solver instead of the local A* solver, install the client and set the solver in `src/config/default.js`:
+
+```bash
+npm install @unitn-asa/pddl-client
+```
+
+Then edit `src/config/default.js` and set:
+
+```js
+	// PDDL Planning options
+	usePddl: true,        // enable PDDL-based movement
+	solver: "online"     // "local" = built-in A* | "online" = @unitn-asa/pddl-client
+```
+
+- Start the agent:
+
+```bash
+npm start
+```
+
+- Quick notes:
+	- `solver: "local"` uses the lightweight internal A* (`src/PDDL/fastLocalSolver.js`).
+	- `solver: "online"` calls `@unitn-asa/pddl-client` at runtime; ensure the package is installed and the host has network access if required.
+	- Logs show `PDDLMove: Using online solver...` or `PDDLMove: Using local solver...` depending on selection.
