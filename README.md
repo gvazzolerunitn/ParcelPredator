@@ -1,31 +1,62 @@
 # ParcelPredator
 
-Scaffold minimale per un agente Deliveroo. Struttura pensata per evolvere verso BDI (belief–desire–intention) con planner locale/PDDL.
+ParcelPredator
 
-## Struttura
-- `src/launcher.js`: entrypoint; connette il client Deliveroo, registra callback, crea l'agente.
-- `src/config/default.js`: host e nome agente; token da inserire manualmente.
-- `src/client/adapter.js`: adatta le API del client (`emitMove` vs `move`) se necessario.
-- `src/client/context.js`: inizializza il client DeliverooApi e esporta eventi/istanze condivise.
-- `src/bdi/agent.js`: stato agente + ciclo intenzioni (stub).
-- `src/bdi/intention.js`: wrapper per un'intenzione e selezione del piano (stub).
-- `src/bdi/plans/`: piani base (stub): `moveBfs`, `goPickUp`, `goDeliver`, `goRandom`.
-- `src/bdi/options.js`: logica di generazione opzioni (stub, da completare).
-- `src/utils/grid.js`: rappresentazione mappa e BFS (placeholder).
-- `src/bdi/belief.js`: credenze (parcels, agents, spawners, delivery zones) (stub).
+Purpose
+- Implement BDI agents for the Deliveroo.js simulator to pick up and deliver parcels reliably under dynamic conditions (moving agents, spawners, time-decaying rewards).
 
-## Come usare (bozza)
-1. Inserisci un token valido in `src/config/default.js` (ottenuto dal server Deliveroo/UI).
-2. Avvia il server Deliveroo (backend) su `http://localhost:8080`.
-3. Installa dipendenze e lancia:
-   ```bash
-   npm install
-   npm start
-   ```
-4. Apri la UI Deliveroo e, con un token diverso, osserva l'agente muoversi.
+Goals
+- Provide a working single-agent prototype (Part 1) and a roadmap to extend it to coordinated multi-agent behavior (Part 2).
 
-## Roadmap suggerita
-- Implementare `Grid.bfsDistance` e `Belief` completo.
-- Implementare `optionsGeneration` per scegliere pacchi/delivery con uno score semplice.
-- Completare i piani in `plans/` richiamando `adapter.move/pickup/putdown`.
-- Aggiungere gestione collisioni e (opzionale) PDDL planner.
+Scope and tasks
+
+Part 1 — Single-agent prototype (required steps)
+- 1. Belief management
+	- store parcels, agents, spawners and delivery zones with timestamps
+	- compute time-decayed expected reward per parcel
+	- remove/expire stale parcels and agents
+- 2. Option generation & scoring
+	- implement greedy multi-pick route builder that scores routes by (expected reward − movement cost)
+	- include contention penalty for parcels likely to be taken by others
+- 3. Execution primitives and plans
+	- `moveBfs`: agent-aware BFS that treats occupied cells as blocked (destination exception)
+	- `goPickUp` / `goDeliver`: robust pickup/putdown that capture IDs and update beliefs immediately
+	- track `carried_parcels` to support multi-pick routes
+- 4. Robustness and recovery
+	- exponential backoff and per-target cooldown on repeated move failures
+	- spawner backoff when choosing where to collect new parcels
+	- on-move failure: retry, replan, and finally register cooldown instead of infinite loop
+- 5. Validation and telemetry
+	- add simple logging/telemetry for pickups, deliveries, failures, and cooldown events
+	- unit tests for core utilities (`bfsPath`, route evaluation) and an integration benchmark harness
+
+Part 2 — Multi-agent extension (planned steps)
+- 1. Shared/observable state and coordination primitives
+	- refine belief sharing (what is safe to broadcast) or implement decentralized heuristics
+- 2. Contention resolution strategies
+	- contention-aware scoring, auctions, or soft-reservations for spawners/parcels
+- 3. Communication & negotiation (optional)
+	- basic message types to announce intent, reserve parcels, or request handoffs
+- 4. Multi-agent experiments
+	- benchmarks comparing centralized vs decentralized strategies and tuning contention penalties
+
+Repository layout (key files)
+- `src/launcher.js` — agent bootstrap and adapter wiring
+- `src/bdi/belief.js` — belief store and aging/expiry logic
+- `src/bdi/options.js` — option generation, greedy route, scoring
+- `src/bdi/plans/moveBfs.js` — BFS movement and recovery/backoff
+- `src/bdi/plans/goPickUp.js` — pickup plan and belief updates
+- `src/bdi/plans/goDeliver.js` — delivery plan and belief updates
+- `src/utils/grid.js` — `bfsPath` with optional blocked-cells parameter
+
+Current status
+- Implemented (prototype): belief aging, multi-pick scoring, agent-aware BFS, exponential backoff, target cooldown, spawner backoff, `carried_parcels` handling, immediate belief updates after actions.
+- Pending (recommended next steps): alternate-route fallback in `moveBfs`, unit tests and benchmark harness, hyperparameter tuning.
+
+Contact / contribution
+- Open an issue or a pull request for feature requests, bugs, or experiments. See code comments for module-level implementation details.
+
+License
+- See repository `LICENSE.md`.
+
+This README focuses on actionable steps and the current implementation roadmap.
