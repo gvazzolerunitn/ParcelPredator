@@ -1,16 +1,14 @@
 # ParcelPredator
 
-ParcelPredator
-
-Purpose
+## Purpose
 - Implement BDI agents for the Deliveroo.js simulator to pick up and deliver parcels reliably under dynamic conditions (moving agents, spawners, time-decaying rewards).
 
-Goals
+## Goals
 - Provide a working single-agent prototype (Part 1) and a roadmap to extend it to coordinated multi-agent behavior (Part 2).
 
-Scope and tasks
+## Scope and tasks
 
-Part 1 — Single-agent prototype (required steps)
+### Part 1 — Single-agent prototype (required steps)
 - 1. Belief management
 	- store parcels, agents, spawners and delivery zones with timestamps
 	- compute time-decayed expected reward per parcel
@@ -30,7 +28,7 @@ Part 1 — Single-agent prototype (required steps)
 	- add simple logging/telemetry for pickups, deliveries, failures, and cooldown events
 	- unit tests for core utilities (`bfsPath`, route evaluation) and an integration benchmark harness
 
-Part 2 — Multi-agent extension (planned steps)
+### Part 2 — Multi-agent extension (planned steps)
 - 1. Shared/observable state and coordination primitives
 	- refine belief sharing (what is safe to broadcast) or implement decentralized heuristics
 - 2. Contention resolution strategies
@@ -40,7 +38,7 @@ Part 2 — Multi-agent extension (planned steps)
 - 4. Multi-agent experiments
 	- benchmarks comparing centralized vs decentralized strategies and tuning contention penalties
 
-Repository layout (key files)
+## Repository layout (key files)
 - `src/launcher.js` — agent bootstrap and adapter wiring
 - `src/bdi/belief.js` — belief store and aging/expiry logic
 - `src/bdi/options.js` — option generation, greedy route, scoring
@@ -49,14 +47,6 @@ Repository layout (key files)
 - `src/bdi/plans/goDeliver.js` — delivery plan and belief updates
 - `src/utils/grid.js` — `bfsPath` with optional blocked-cells parameter
 
-Current status
+## Current status
 - Implemented (prototype): belief aging, multi-pick scoring, agent-aware BFS, exponential backoff, target cooldown, spawner backoff, `carried_parcels` handling, immediate belief updates after actions.
 - Pending (recommended next steps): alternate-route fallback in `moveBfs`, unit tests and benchmark harness, hyperparameter tuning.
-
-Contact / contribution
-- Open an issue or a pull request for feature requests, bugs, or experiments. See code comments for module-level implementation details.
-
-License
-- See repository `LICENSE.md`.
-
-This README focuses on actionable steps and the current implementation roadmap.
