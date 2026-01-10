@@ -109,7 +109,9 @@ class MoveBfs {
         if (this.stopped) throw new Error("stopped");
         const ok = await adapter.move(dir);
         
-        if (ok === false) {
+        // emitMove ritorna {x,y} se successo, false se bloccato
+        // Verifichiamo con !ok per catturare false, undefined, null
+        if (!ok) {
           // Movimento bloccato: exponential backoff e riprova
           blocked = true;
           retries++;

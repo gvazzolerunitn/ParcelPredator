@@ -50,20 +50,44 @@ adapter.onAgents((agents) => {
 
 adapter.onConfig((cfg) => {
   console.log("server config", cfg);
-  // Calcola lossForMovement in base a decay e velocità movimento
+  
+  // Calcola lossPerSecond in base a PARCEL_DECADING_INTERVAL
+  // Formati possibili: 'infinite', '1000ms', '1s', 1000 (numero), '1000' (stringa numerica)
   let lossPerSecond = 0;
-  if (cfg.PARCEL_DECADING_INTERVAL && cfg.PARCEL_DECADING_INTERVAL !== 'infinite') {
-    const ms = parseInt(cfg.PARCEL_DECADING_INTERVAL.replace('s','').replace('ms',''));
-    lossPerSecond = cfg.PARCEL_DECADING_INTERVAL.includes('ms') ? 1000/ms : 1/ms;
+  const decayInterval = cfg.PARCEL_DECADING_INTERVAL;
+  if (decayInterval && decayInterval !== 'infinite') {
+    let intervalMs;
+    if (typeof decayInterval === 'number') {
+      intervalMs = decayInterval;
+    } else if (typeof decayInterval === 'string') {
+      const str = decayInterval.trim().toLowerCase();
+      if (str.endsWith('ms')) {
+        intervalMs = parseFloat(str.replace('ms', ''));
+      } else if (str.endsWith('s')) {
+        intervalMs = parseFloat(str.replace('s', '')) * 1000;
+      } else {
+        intervalMs = parseFloat(str);
+      }
+    }
+    if (intervalMs && !isNaN(intervalMs) && intervalMs > 0) {
+      lossPerSecond = 1000 / intervalMs; // 1 reward perso ogni intervalMs ms
+    }
   }
+  
+  // Calcola movesPerSecond in base a MOVEMENT_DURATION
   let movesPerSecond = 1;
-  if (cfg.MOVEMENT_DURATION) {
-    movesPerSecond = 1000 / cfg.MOVEMENT_DURATION;
+  const moveDuration = cfg.MOVEMENT_DURATION;
+  if (moveDuration) {
+    const durationMs = typeof moveDuration === 'number' ? moveDuration : parseFloat(moveDuration);
+    if (durationMs && !isNaN(durationMs) && durationMs > 0) {
+      movesPerSecond = 1000 / durationMs;
+    }
   }
+  
   me.lossForMovement = lossPerSecond / movesPerSecond;
   me.lossForSecond = lossPerSecond;
-  belief.setLossForSecond(lossPerSecond); // Imposta loss rate nel belief per decay
-  console.log('lossForMovement:', me.lossForMovement, '| lossForSecond:', lossPerSecond);
+  belief.setLossForSecond(lossPerSecond);
+  console.log('lossForMovement:', me.lossForMovement.toFixed(4), '| lossForSecond:', lossPerSecond.toFixed(4));
 });
 
 // Avvia loop dell'agente
