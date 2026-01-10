@@ -1,5 +1,7 @@
 import { adapter } from "../../client/adapter.js";
 import { MoveBfs } from "./moveBfs.js";
+import { PDDLMove } from "./pddlMove.js";
+import config from "../../config/default.js";
 
 class GoPickUp {
   static isApplicableTo(desire) { return desire === 'go_pick_up'; }
@@ -8,7 +10,7 @@ class GoPickUp {
   async execute(_desire, x, y, id) {
     if (this.stopped) throw new Error("stopped");
     // muovi verso il pacco se non sei già sopra
-    const mover = new MoveBfs(this.parent);
+    const mover = (config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent));
     if (Math.round(this.parent.x) !== Math.round(x) || Math.round(this.parent.y) !== Math.round(y)) {
       await mover.execute('go_to', x, y, this.parent.belief);
     }

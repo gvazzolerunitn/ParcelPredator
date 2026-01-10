@@ -1,13 +1,17 @@
 {
   "name": "parcelpredator",
-  "version": "0.1.0",
-  "description": "ParcelPredator - BDI-based Deliveroo agent scaffold",
+  "version": "0.2.0",
+  "description": "ParcelPredator - BDI-based Deliveroo agent with PDDL planning support",
   "type": "module",
   "main": "src/launcher.js",
   "scripts": {
-    "start": "node src/launcher.js"
+    "start": "node src/launcher.js",
+    "start:pddl": "node src/launcher.js --pddl"
   },
   "dependencies": {
     "@unitn-asa/deliveroo-js-client": "^2.0.2"
+  },
+  "optionalDependencies": {
+    "@unitn-asa/pddl-client": "^0.0.37"
   }
 }
