@@ -3,17 +3,78 @@ import { MoveBfs } from "./moveBfs.js";
 import { PDDLMove } from "./pddlMove.js";
 import config from "../../config/default.js";
 
+// Retry/backoff settings from config
+const PLAN_MAX_ATTEMPTS = config.planMaxAttempts ?? 3;
+const BACKOFF_BASE_MS = config.planBackoffBaseMs ?? 200;
+const BACKOFF_JITTER_MS = config.planBackoffJitterMs ?? 100;
+const TARGET_COOLDOWN_MS = config.targetCooldownMs ?? 3000;
+
+/**
+ * Helper: sleep for ms milliseconds
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Helper: compute backoff with jitter
+ */
+function getBackoff(attempt) {
+  const base = BACKOFF_BASE_MS * Math.pow(2, attempt);
+  const jitter = Math.floor(Math.random() * BACKOFF_JITTER_MS);
+  return base + jitter;
+}
+
 class GoPickUp {
   static isApplicableTo(desire) { return desire === 'go_pick_up'; }
   constructor(parent) { this.parent = parent; this.stopped = false; }
   stop() { this.stopped = true; }
   async execute(_desire, x, y, id) {
     if (this.stopped) throw new Error("stopped");
-    // muovi verso il pacco se non sei già sopra
-    const mover = (config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent));
-    if (Math.round(this.parent.x) !== Math.round(x) || Math.round(this.parent.y) !== Math.round(y)) {
-      await mover.execute('go_to', x, y, this.parent.belief);
+    
+    const tx = Math.round(x);
+    const ty = Math.round(y);
+    
+    // Check if target is on cooldown
+    if (this.parent.belief && this.parent.belief.isOnCooldown('parcel', id)) {
+      console.log(`GoPickUp: Parcel ${id} is on cooldown, skipping`);
+      throw new Error("target on cooldown");
     }
+    
+    // Macro-retry loop for movement with replan
+    let moveResult = true;
+    if (Math.round(this.parent.x) !== tx || Math.round(this.parent.y) !== ty) {
+      for (let attempt = 0; attempt < PLAN_MAX_ATTEMPTS; attempt++) {
+        if (this.stopped) throw new Error("stopped");
+        
+        const mover = (config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent));
+        moveResult = await mover.execute('go_to', tx, ty, this.parent.belief);
+        
+        if (moveResult === true) {
+          // Success - clear any cooldown on this target
+          if (this.parent.belief) {
+            this.parent.belief.clearCooldown('parcel', id);
+          }
+          break;
+        }
+        
+        if (moveResult === "obstructed") {
+          if (attempt < PLAN_MAX_ATTEMPTS - 1) {
+            const backoff = getBackoff(attempt);
+            console.log(`GoPickUp: Path obstructed, attempt ${attempt + 1}/${PLAN_MAX_ATTEMPTS} — retrying in ${backoff}ms`);
+            await sleep(backoff);
+          } else {
+            // All retries exhausted - set cooldown
+            console.log(`GoPickUp: All ${PLAN_MAX_ATTEMPTS} attempts failed for parcel ${id}`);
+            if (this.parent.belief) {
+              this.parent.belief.setCooldown('parcel', id, TARGET_COOLDOWN_MS);
+            }
+            throw new Error("pickup failed " + id);
+          }
+        }
+      }
+    }
+    
     if (this.stopped) throw new Error("stopped");
     const res = await adapter.pickup();
     
@@ -35,6 +96,10 @@ class GoPickUp {
       }
       // Rimuovi il pacco dalla belief (non è più disponibile sulla mappa)
       this.parent.belief.removeParcel(p.id);
+      // Clear cooldown if any
+      if (this.parent.belief) {
+        this.parent.belief.clearCooldown('parcel', p.id);
+      }
     }
     // Aggiorna i contatori basati sulla lista cumulativa
     this.parent.carried = this.parent.carried_parcels.length;

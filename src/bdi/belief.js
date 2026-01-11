@@ -155,6 +155,56 @@ class Belief {
     this.checkExpiredAgents();
     return Array.from(this.agents.values()).filter(a => a.id !== myId);
   }
+
+  // ============================================================================
+  // COOLDOWN API - per evitare retry aggressivi su target irraggiungibili
+  // ============================================================================
+  
+  /**
+   * Imposta un cooldown per un target specifico
+   * @param {string} kind - tipo di target ('parcel', 'tile', 'spawner')
+   * @param {string} key - identificativo (es. 'p4', '5,3')
+   * @param {number} ms - durata cooldown in millisecondi
+   */
+  setCooldown(kind, key, ms) {
+    if (!this._cooldowns) this._cooldowns = new Map();
+    const fullKey = `${kind}:${key}`;
+    const until = Date.now() + ms;
+    this._cooldowns.set(fullKey, until);
+    console.log(`Cooldown set: ${fullKey} until ${new Date(until).toISOString().slice(11, 19)}`);
+  }
+
+  /**
+   * Verifica se un target è in cooldown
+   * @param {string} kind - tipo di target
+   * @param {string} key - identificativo
+   * @returns {boolean} true se ancora in cooldown
+   */
+  isOnCooldown(kind, key) {
+    if (!this._cooldowns) return false;
+    const fullKey = `${kind}:${key}`;
+    const until = this._cooldowns.get(fullKey);
+    if (!until) return false;
+    if (Date.now() >= until) {
+      this._cooldowns.delete(fullKey);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Rimuove il cooldown di un target (es. quando raggiungiamo con successo)
+   * @param {string} kind - tipo di target
+   * @param {string} key - identificativo
+   */
+  clearCooldown(kind, key) {
+    if (!this._cooldowns) return;
+    const fullKey = `${kind}:${key}`;
+    if (this._cooldowns.has(fullKey)) {
+      this._cooldowns.delete(fullKey);
+      console.log(`Cooldown cleared: ${fullKey}`);
+    }
+  }
 }
 
 export { Belief };

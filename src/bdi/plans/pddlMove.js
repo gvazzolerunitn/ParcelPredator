@@ -5,6 +5,7 @@
  * Generates a PDDL problem from current state, calls the solver,
  * and executes the returned plan step by step.
  * 
+ * Includes micro-retry logic for individual moves.
  * Falls back gracefully if planning fails or path is obstructed.
  */
 
@@ -22,6 +23,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DOMAIN_PATH = path.join(__dirname, "../../PDDL/domain.pddl");
 
+// Retry settings from config
+const MICRO_RETRIES = config.moveMicroRetries ?? 1;
+const MICRO_RETRY_DELAY = config.microRetryDelayMs ?? 100;
+
+/**
+ * Helper: sleep for ms milliseconds
+ */
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 class PDDLMove {
   static isApplicableTo(desire) {
     // Only apply if PDDL is enabled in config
@@ -35,6 +47,26 @@ class PDDLMove {
 
   stop() {
     this.stopped = true;
+  }
+
+  /**
+   * Execute a single move with micro-retry logic
+   * @param {string} action - direction to move ('up', 'down', 'left', 'right')
+   * @returns {Promise<boolean>} true if move succeeded, false if all retries failed
+   */
+  async moveWithRetry(action) {
+    for (let attempt = 0; attempt <= MICRO_RETRIES; attempt++) {
+      const result = await adapter.move(action);
+      if (result) {
+        return true;
+      }
+      
+      if (attempt < MICRO_RETRIES) {
+        console.log(`PDDLMove: Move '${action}' failed, micro-retry ${attempt + 1}/${MICRO_RETRIES}`);
+        await sleep(MICRO_RETRY_DELAY);
+      }
+    }
+    return false;
   }
 
   /**
@@ -108,7 +140,7 @@ class PDDLMove {
       throw new Error("no plan found");
     }
 
-    // Execute plan steps
+    // Execute plan steps with micro-retry
     console.log(`PDDLMove: Executing plan: ${plan.map(s => s.action).join(", ")}`);
 
     for (const step of plan) {
@@ -124,10 +156,10 @@ class PDDLMove {
         action = action.replace("move-", "").toLowerCase();
       }
 
-      const result = await adapter.move(action);
+      const moveOk = await this.moveWithRetry(action);
 
-      if (!result) {
-        console.log(`PDDLMove: Move '${action}' failed, path obstructed`);
+      if (!moveOk) {
+        console.log(`PDDLMove: Move '${action}' failed after ${MICRO_RETRIES + 1} attempts, path obstructed`);
         return "obstructed";
       }
     }
