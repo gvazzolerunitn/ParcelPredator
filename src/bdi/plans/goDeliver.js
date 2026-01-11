@@ -49,7 +49,21 @@ class GoDeliver {
         if (this.stopped) throw new Error("stopped");
         
         const mover = (config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent));
-        moveResult = await mover.execute('go_to', tx, ty, this.parent.belief);
+        
+        // Wrap in try-catch to handle 'no plan found' and other errors
+        try {
+          moveResult = await mover.execute('go_to', tx, ty, this.parent.belief);
+        } catch (err) {
+          // Treat 'no plan found' as retriable (like obstructed)
+          if (err.message === 'no plan found' || err.message === 'domain not found') {
+            moveResult = 'no-plan';
+          } else if (err.message === 'stopped') {
+            throw err; // Re-throw stop signals
+          } else {
+            console.log(`GoDeliver: Unexpected error: ${err.message}`);
+            moveResult = 'error';
+          }
+        }
         
         if (moveResult === true) {
           // Success - clear any cooldown on this target
@@ -59,14 +73,17 @@ class GoDeliver {
           break;
         }
         
-        if (moveResult === "obstructed") {
+        // Handle retriable failures: obstructed, no-plan, error
+        if (moveResult === "obstructed" || moveResult === "no-plan" || moveResult === "error") {
+          const reason = moveResult === "obstructed" ? "path obstructed" : 
+                         moveResult === "no-plan" ? "no plan found" : "error";
           if (attempt < PLAN_MAX_ATTEMPTS - 1) {
             const backoff = getBackoff(attempt);
-            console.log(`GoDeliver: Path obstructed, attempt ${attempt + 1}/${PLAN_MAX_ATTEMPTS} — retrying in ${backoff}ms`);
+            console.log(`GoDeliver: ${reason}, attempt ${attempt + 1}/${PLAN_MAX_ATTEMPTS} — retrying in ${backoff}ms`);
             await sleep(backoff);
           } else {
             // All retries exhausted - set cooldown
-            console.log(`GoDeliver: All ${PLAN_MAX_ATTEMPTS} attempts failed for delivery zone (${tx},${ty})`);
+            console.log(`GoDeliver: All ${PLAN_MAX_ATTEMPTS} attempts failed for delivery zone (${tx},${ty}) (${reason})`);
             if (this.parent.belief) {
               this.parent.belief.setCooldown('delivery', tileKey, TARGET_COOLDOWN_MS);
             }

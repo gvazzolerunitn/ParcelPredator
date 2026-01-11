@@ -1,7 +1,6 @@
 // optionsGeneration: produce intenzioni candidate con scoring multi-pick
 // Versione 3: supporta batch pickup + agent avoidance/contention handling
 import { grid as globalGrid } from "../utils/grid.js";
-import { isTargetInCooldown } from "./plans/moveBfs.js";
 
 // ============================================================================
 // STATO per backoff esplorazione spawner
@@ -63,8 +62,8 @@ function getNearbyFreeParcels(belief, x, y, g, myId, K = 10) {
   const otherAgents = belief.getOtherAgents(myId);
   
   const withDist = parcels
-    // Filtra pacchi in cooldown
-    .filter(p => !isTargetInCooldown(p.x, p.y))
+    // Filtra pacchi in cooldown (usando belief cooldowns)
+    .filter(p => !(belief?.isOnCooldown && belief.isOnCooldown('parcel', p.id)))
     .map(p => {
       const dist = g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y));
       const contention = getContentionPenalty(p, x, y, otherAgents, g);
@@ -153,7 +152,7 @@ function chooseBestSpawner(spawners, myX, myY, otherAgents, g) {
  * Trova la delivery zone più vicina a (x,y)
  * Preferisce zone non in cooldown, ma se tutte lo sono, sceglie la più vicina comunque
  */
-function findNearestDelivery(x, y, deliveryZones, g) {
+function findNearestDelivery(x, y, deliveryZones, g, belief) {
   let bestNotCooled = null;
   let bestNotCooledDist = Infinity;
   let bestAny = null;
@@ -164,7 +163,8 @@ function findNearestDelivery(x, y, deliveryZones, g) {
     // Track best overall
     if (dist < bestAnyDist) { bestAnyDist = dist; bestAny = d; }
     // Track best not in cooldown
-    if (!isTargetInCooldown(d.x, d.y) && dist < bestNotCooledDist) { 
+    const cooled = belief?.isOnCooldown && belief.isOnCooldown('delivery', `${d.x},${d.y}`);
+    if (!cooled && dist < bestNotCooledDist) { 
       bestNotCooledDist = dist; 
       bestNotCooled = d; 
     }
@@ -289,7 +289,7 @@ function optionsGeneration({ me, belief, grid, push }) {
   }
 
   // Trova delivery zone più vicina dalla posizione attuale
-  const { zone: nearestDelivery, dist: distToDelivery } = findNearestDelivery(me.x, me.y, deliveryZones, g);
+  const { zone: nearestDelivery, dist: distToDelivery } = findNearestDelivery(me.x, me.y, deliveryZones, g, belief);
 
   // Prendi i K pacchi più vicini (con info contention)
   const K = 10;
@@ -367,12 +367,17 @@ function optionsGeneration({ me, belief, grid, push }) {
 
   // Caso D: nessun pacco trasportato e nessuna rotta valida -> esplora spawner (evitando altri agenti)
   if (belief.parcelSpawners && belief.parcelSpawners.length > 0) {
-    const result = chooseBestSpawner(belief.parcelSpawners, me.x, me.y, otherAgents, g);
-    if (result && result.spawner) {
-      const avoidMsg = result.nearbyAgents > 0 ? ` (avoiding ${result.nearbyAgents} agents)` : '';
-      console.log('-> go_to spawner', result.spawner.x, result.spawner.y + avoidMsg);
-      push(['go_pick_up', result.spawner.x, result.spawner.y, 'explore', 0]);
-      return;
+    // Evita di riproporre esplorazioni mentre l'explore è in cooldown
+    if (belief?.isOnCooldown && belief.isOnCooldown('parcel', 'explore')) {
+      console.log('-> explore target is on cooldown, skipping');
+    } else {
+      const result = chooseBestSpawner(belief.parcelSpawners, me.x, me.y, otherAgents, g);
+      if (result && result.spawner) {
+        const avoidMsg = result.nearbyAgents > 0 ? ` (avoiding ${result.nearbyAgents} agents)` : '';
+        console.log('-> go_to spawner', result.spawner.x, result.spawner.y + avoidMsg);
+        push(['go_pick_up', result.spawner.x, result.spawner.y, 'explore', 0]);
+        return;
+      }
     }
   }
 
