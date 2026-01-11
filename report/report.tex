@@ -1,0 +1,237 @@
+\documentclass[a4paper, 10pt, twocolumn]{article}
+
+% --- Packages ---
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{geometry}
+\usepackage{graphicx} % Fondamentale per il logo
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{titlesec}
+\usepackage{caption}
+
+% --- Geometry Configuration ---
+\geometry{top=2.5cm, bottom=2.5cm, left=1.5cm, right=1.5cm}
+
+% --- Title Formatting ---
+\titlespacing*{\section}{0pt}{1.5ex plus 1ex minus .2ex}{1ex plus .2ex}
+\titlespacing*{\subsection}{0pt}{1ex plus 1ex minus .2ex}{0.5ex plus .2ex}
+
+% --- Code Snippet Styling ---
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\lstset{style=mystyle}
+
+\begin{document}
+
+\begin{titlepage}
+    \onecolumn
+    \centering
+    
+    % --- INTESTAZIONE ---
+    \vspace*{1cm} % Margine superiore visivo
+    
+    {\scshape\LARGE University of Trento \par}
+    
+    \vspace{1.5cm} % Spazio fisso per separare l'istituzione dal logo
+    
+    % Logo: Inserito direttamente senza ambiente figure
+    % width=0.35\textwidth è spesso il "golden ratio" visivo per i loghi verticali/quadrati
+    \includegraphics[width=0.35\textwidth]{img/unitn_logo.png}
+    
+    \vfill % Spazio elastico 1
+    
+    % --- CONTESTO ---
+    {\scshape\Large Autonomous Software Agents \par}
+    \vspace{0.5cm}
+    {\large Final Project Report \par}
+    
+    \vspace{1cm}
+    
+    % --- BLOCCO TITOLO ---
+    % Le linee orizzontali danno struttura. 
+    % Ho aggiunto un po' di "respiro" verticale dentro le linee.
+    \hrule height 0.5pt
+    \vspace{0.6cm}
+    { \huge \bfseries Parcel Predator \par}
+    \vspace{0.6cm}
+    \hrule height 0.5pt
+    
+    \vfill % Spazio elastico 2
+    
+    % --- AUTORE ---
+    \emph{Author:}\\[0.5cm]
+    {\Large\bfseries Gianluigi Vazzoler} \\
+    \large (257846)
+    
+    \vfill % Spazio elastico 3 (spinge la data in fondo)
+    
+    % --- DATA (Solo Mese e Anno) ---
+    % Questo codice genera automaticamente il nome del mese in inglese + anno
+    {\large 
+    \ifcase\month\or January\or February\or March\or April\or May\or June\or July\or August\or September\or October\or November\or December\fi
+    \ \number\year
+    }
+    
+    \vspace*{2cm} % Margine inferiore visivo
+\end{titlepage}
+\twocolumn % Switch back to two columns for the report text
+
+% --- Abstract ---
+\begin{abstract}
+    \emph{[TODO: Write a brief summary of the project, covering the goal, the BDI architecture approach, the multi-agent coordination strategy, and the key results obtained.]}
+\end{abstract}
+
+% --- Chapter 1 ---
+\section{Introduction}
+    \emph{[TODO: Introduce the context of the project.]}
+
+    \subsection{Context and Motivation}
+    \emph{[TODO: Describe the problem domain (Deliveroo.js) and why autonomous agents are needed.]}
+
+    \subsection{Project Objectives}
+    \emph{[TODO: List the main goals (e.g., maximizing score, efficient pathfinding, robust coordination).]}
+
+% --- Chapter 2 ---
+\section{System Architecture}
+    \emph{[TODO: High-level overview of the system.]}
+
+    \subsection{General Overview}
+    \emph{[TODO: Briefly explain how the system is organized.]}
+
+    \subsection{The Agent Model (BDI)}
+    \emph{[TODO: Explain how the Belief-Desire-Intention model is implemented.]}
+
+    \subsection{Environment and Perception}
+    \emph{[TODO: Describe how the agent perceives the grid, parcels, and other agents.]}
+
+% --- Chapter 3 ---
+\section{Single Agent Strategy}
+    \emph{[TODO: Detail the logic for a single agent.]}
+
+    \subsection{Belief Revision}
+    \emph{[TODO: How does the agent update its internal state based on new perceptions?]}
+
+    \subsection{Option Generation and Scoring}
+    \emph{[TODO: Explain the formula or logic used to rank different options (e.g., pick up vs. deliver).]}
+    
+    \begin{equation}
+        Score = \frac{Reward}{Cost} 
+    \end{equation}
+
+    \subsection{Intention Management}
+    \emph{[TODO: How does the agent select and switch intentions?]}
+
+    \subsection{Path Planning}
+    \emph{[TODO: Discuss the algorithms used (e.g., BFS, A*, etc.) for navigation.]}
+
+% --- Chapter 4 ---
+\section{Multi-Agent Coordination}
+    \emph{[TODO: Detail the strategy for the team of agents.]}
+
+    \subsection{Communication Protocol}
+    \emph{[TODO: Describe the message types and the handshake process.]}
+
+    \subsection{Negotiation and Conflict Resolution}
+    \emph{[TODO: How do agents decide who goes where to avoid collisions?]}
+
+    \subsection{Map Division (Optional)}
+    \emph{[TODO: If applicable, describe how the map is split between agents.]}
+
+% --- Chapter 5 ---
+\section{PDDL Implementation}
+    \emph{[TODO: Detail the integration of the external planner.]}
+
+    \subsection{Domain Formalization}
+    \emph{[TODO: Describe the predicates and actions defined in the PDDL domain.]}
+
+    \subsection{Problem Solving Strategy}
+    \emph{[TODO: When is PDDL triggered? How are problems generated?]}
+
+    \begin{lstlisting}[language=Lisp, caption={PDDL Action Example}]
+    (:action move
+        :parameters (?a - agent ?from ?to - tile)
+        ...
+    )
+    \end{lstlisting}
+
+% --- Chapter 6 ---
+\section{Implementation Details}
+    \emph{[TODO: Technical details about the code.]}
+
+    \subsection{Code Structure}
+    \emph{[TODO: Overview of the files and modules.]}
+
+    \subsection{Key Technologies}
+    \emph{[TODO: Mention Node.js, libraries used, etc.]}
+
+% --- Chapter 7 ---
+\section{Experiments and Results}
+    \emph{[TODO: Present the data gathered.]}
+
+    \subsection{Experimental Setup}
+    \emph{[TODO: Describe the testing environment, maps used, and opponent configuration.]}
+
+    \subsection{Single Agent Performance}
+    \emph{[TODO: Compare performance (e.g., BFS vs PDDL) in single mode.]}
+
+    \begin{table}[htbp]
+    \centering
+    \begin{tabular}{lcc}
+    \toprule
+    \textbf{Map} & \textbf{Strategy A} & \textbf{Strategy B} \\
+    \midrule
+    Map 1 & 100 & 120 \\
+    Map 2 & 200 & 180 \\
+    \bottomrule
+    \end{tabular}
+    \caption{Score comparison}
+    \label{tab:results}
+    \end{table}
+
+    \subsection{Multi-Agent Performance}
+    \emph{[TODO: Analyze the efficiency of the team coordination.]}
+
+    \begin{figure}[htbp]
+        \centering
+        \framebox[\linewidth]{\rule{0pt}{3cm}Insert Chart Here}
+        \caption{Multi-agent performance graph}
+        \label{fig:chart}
+    \end{figure}
+
+% --- Chapter 8 ---
+\section{Discussion and Conclusion}
+    \emph{[TODO: Discuss the strengths and weaknesses of the solution. Conclude with future improvements.]}
+
+% --- Bibliography ---
+\begin{thebibliography}{9}
+    \bibitem{slides}
+    P. Giorgini, M. Robol, \emph{Autonomous Software Agents Course Slides}, UniTrento, 2025.
+\end{thebibliography}
+
+\end{document}

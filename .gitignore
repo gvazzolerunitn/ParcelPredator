@@ -62,3 +62,15 @@ coverage-final.json
 # Optional: lock files (recommended to commit lock files for reproducible installs)
 # package-lock.json
 # yarn.lock
+
+# LaTeX report build artifacts (ignore intermediate files in report/)
+# Keep source `.tex` and final `.pdf` tracked; ignore build/cache files
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.fls
+report/*.fdb_latexmk
+report/*.synctex.gz
+report/*.bbl
+report/*.blg
