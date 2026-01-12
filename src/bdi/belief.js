@@ -205,6 +205,209 @@ class Belief {
       console.log(`Cooldown cleared: ${fullKey}`);
     }
   }
+
+  // ============================================================================
+  // MULTI-AGENT: Remote belief merging and claim registry
+  // ============================================================================
+
+  /**
+   * Merge parcels received from friend agent
+   * Only adds parcels we don't already know about or updates if remote is fresher
+   * @param {Array} remoteParcels - parcels from friend agent
+   */
+  mergeRemoteParcels(remoteParcels) {
+    const now = Date.now();
+    for (const p of remoteParcels) {
+      const existing = this.parcels.get(p.id);
+      // Add if we don't have it, or if remote observation is newer
+      if (!existing || (p.timestamp && p.timestamp > existing.timestamp)) {
+        this.parcels.set(p.id, {
+          id: p.id,
+          x: Math.round(p.x),
+          y: Math.round(p.y),
+          reward: p.reward,
+          observedReward: p.reward,
+          carriedBy: p.carriedBy,
+          timestamp: p.timestamp || now,
+          remote: true // Mark as received from friend
+        });
+      }
+    }
+  }
+
+  /**
+   * Apply parcels delta received from friend agent (diff-only)
+   * @param {Object} delta - { added: [], updated: [], removed: [] }
+   */
+  applyParcelsDelta(delta) {
+    const now = Date.now();
+    
+    // Add new parcels
+    for (const p of delta.added || []) {
+      if (!this.parcels.has(p.id)) {
+        this.parcels.set(p.id, {
+          id: p.id,
+          x: Math.round(p.x),
+          y: Math.round(p.y),
+          reward: p.reward,
+          observedReward: p.reward,
+          carriedBy: p.carriedBy,
+          timestamp: now,
+          remote: true
+        });
+      }
+    }
+    
+    // Update existing parcels
+    for (const p of delta.updated || []) {
+      this.parcels.set(p.id, {
+        id: p.id,
+        x: Math.round(p.x),
+        y: Math.round(p.y),
+        reward: p.reward,
+        observedReward: p.reward,
+        carriedBy: p.carriedBy,
+        timestamp: now,
+        remote: true
+      });
+    }
+    
+    // Remove parcels
+    for (const id of delta.removed || []) {
+      this.parcels.delete(id);
+    }
+  }
+
+  /**
+   * Merge agents received from friend agent
+   * @param {Array} remoteAgents - agents from friend agent
+   * @param {string} myId - our agent id (to exclude self)
+   */
+  mergeRemoteAgents(remoteAgents, myId) {
+    const now = Date.now();
+    for (const a of remoteAgents) {
+      if (a.id === myId) continue; // Don't overwrite self
+      const existing = this.agents.get(a.id);
+      // Add if we don't have it, or if remote observation is newer
+      if (!existing || (a.timestamp && a.timestamp > existing.timestamp)) {
+        this.agents.set(a.id, {
+          id: a.id,
+          name: a.name,
+          x: Math.round(a.x),
+          y: Math.round(a.y),
+          score: a.score,
+          timestamp: a.timestamp || now,
+          remote: true
+        });
+      }
+    }
+  }
+
+  /**
+   * Apply agents delta received from friend agent (diff-only)
+   * @param {Object} delta - { added: [], updated: [], removed: [] }
+   * @param {string} myId - our agent id (to exclude self)
+   */
+  applyAgentsDelta(delta, myId) {
+    const now = Date.now();
+    
+    // Add new agents
+    for (const a of delta.added || []) {
+      if (a.id === myId) continue;
+      if (!this.agents.has(a.id)) {
+        this.agents.set(a.id, {
+          id: a.id,
+          x: Math.round(a.x),
+          y: Math.round(a.y),
+          timestamp: now,
+          remote: true
+        });
+      }
+    }
+    
+    // Update existing agents
+    for (const a of delta.updated || []) {
+      if (a.id === myId) continue;
+      this.agents.set(a.id, {
+        ...this.agents.get(a.id),
+        id: a.id,
+        x: Math.round(a.x),
+        y: Math.round(a.y),
+        timestamp: now,
+        remote: true
+      });
+    }
+    
+    // Remove agents
+    for (const id of delta.removed || []) {
+      if (id !== myId) {
+        this.agents.delete(id);
+      }
+    }
+  }
+
+  /**
+   * Register a claim (intention) from friend agent
+   * Used for coordination: avoid picking same parcel
+   * @param {string} agentId - friend agent id
+   * @param {Array} predicate - intention [action, x, y, id, score]
+   */
+  registerClaim(agentId, predicate) {
+    if (!this._claims) this._claims = new Map();
+    const [action, x, y, id, score] = predicate;
+    this._claims.set(agentId, {
+      action,
+      x,
+      y,
+      targetId: id,
+      score,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Get all active claims (not expired)
+   * Claims expire after 3 seconds
+   * @returns {Map} agentId -> claim object
+   */
+  getClaims() {
+    if (!this._claims) return new Map();
+    const now = Date.now();
+    const CLAIM_TTL = 3000; // 3 seconds
+    
+    // Clean expired claims
+    for (const [agentId, claim] of this._claims) {
+      if (now - claim.timestamp > CLAIM_TTL) {
+        this._claims.delete(agentId);
+      }
+    }
+    return this._claims;
+  }
+
+  /**
+   * Check if a parcel is claimed by another agent
+   * @param {string} parcelId - parcel id to check
+   * @returns {object|null} claim object if claimed, null otherwise
+   */
+  isParcelClaimed(parcelId) {
+    const claims = this.getClaims();
+    for (const [agentId, claim] of claims) {
+      if (claim.action === 'go_pick_up' && claim.targetId === parcelId) {
+        return { agentId, ...claim };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Get friend's current intention (if any)
+   * @param {string} friendId - friend agent id
+   * @returns {object|null} claim object or null
+   */
+  getFriendIntention(friendId) {
+    if (!this._claims) return null;
+    return this._claims.get(friendId) || null;
+  }
 }
 
 export { Belief };

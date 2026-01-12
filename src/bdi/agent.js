@@ -17,6 +17,9 @@ class Agent {
     // Parametri per scoring multi-pick
     this.capacity = 4;            // Numero max pacchi trasportabili
     this.lossForMovement = 0;     // Perdita reward per movimento (calcolato da config server)
+    // Multi-agent coordination
+    this.friendId = null;         // ID of collaborative friend agent
+    this.isSecondAgent = false;   // true if this is agent 2
   }
 
   setValues({ id, name, x, y, score, carried }) {

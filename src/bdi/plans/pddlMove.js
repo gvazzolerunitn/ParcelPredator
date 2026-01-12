@@ -14,6 +14,7 @@ import { grid } from "../../utils/grid.js";
 import { PddlPlanner } from "../../PDDL/pddlPlanner.js";
 import { fastLocalSolver, onlineSolverFallback } from "../../PDDL/fastLocalSolver.js";
 import config from "../../config/default.js";
+import { agentLogger } from '../../utils/logger.js';
 import fs from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -62,7 +63,7 @@ class PDDLMove {
       }
       
       if (attempt < MICRO_RETRIES) {
-        console.log(`PDDLMove: Move '${action}' failed, micro-retry ${attempt + 1}/${MICRO_RETRIES}`);
+        agentLogger.hot('moveRetry', 2000, `PDDLMove: Move '${action}' failed, micro-retry ${attempt + 1}/${MICRO_RETRIES}`);
         await sleep(MICRO_RETRY_DELAY);
       }
     }
@@ -112,7 +113,7 @@ class PDDLMove {
     try {
       domain = fs.readFileSync(DOMAIN_PATH, "utf8");
     } catch (err) {
-      console.error("PDDLMove: Cannot read domain.pddl:", err.message);
+      agentLogger.error('PDDLMove: Cannot read domain.pddl:', err.message);
       throw new Error("domain not found");
     }
 
@@ -121,31 +122,31 @@ class PDDLMove {
     let plan;
 
     if (config.solver === "online") {
-      console.log("PDDLMove: Using online solver...");
+      if (config.DEBUG) agentLogger.debug('PDDLMove: Using online solver...');
       plan = await onlineSolverFallback(domain, problem);
     } else {
-      console.log("PDDLMove: Using local solver...");
+      if (config.DEBUG) agentLogger.debug('PDDLMove: Using local solver...');
       plan = await fastLocalSolver(domain, problem);
     }
 
     const elapsed = Date.now() - startTime;
-    console.log(`PDDLMove: Solver completed in ${elapsed}ms, plan length: ${plan?.length || 0}`);
+    if (config.DEBUG) agentLogger.debug(`PDDLMove: Solver completed in ${elapsed}ms, plan length: ${plan?.length || 0}`);
 
     // Empty plan but not at goal = no solution
     if (!plan || plan.length === 0) {
       if (sx === tx && sy === ty) {
         return true; // Already there
       }
-      console.log("PDDLMove: No plan found");
+      agentLogger.warn('PDDLMove: No plan found');
       throw new Error("no plan found");
     }
 
     // Execute plan steps with micro-retry
-    console.log(`PDDLMove: Executing plan: ${plan.map(s => s.action).join(", ")}`);
+    if (config.DEBUG) agentLogger.debug(`PDDLMove: Executing plan: ${plan.map(s => s.action).join(", ")}`);
 
     for (const step of plan) {
-      if (this.stopped) {
-        console.log("PDDLMove: Plan stopped during execution");
+        if (this.stopped) {
+        agentLogger.hot('planStopped', 5000, 'PDDLMove: Plan stopped during execution');
         throw new Error("stopped");
       }
 
@@ -158,8 +159,8 @@ class PDDLMove {
 
       const moveOk = await this.moveWithRetry(action);
 
-      if (!moveOk) {
-        console.log(`PDDLMove: Move '${action}' failed after ${MICRO_RETRIES + 1} attempts, path obstructed`);
+        if (!moveOk) {
+        agentLogger.hot('moveObstructed', 5000, `PDDLMove: Move '${action}' failed after ${MICRO_RETRIES + 1} attempts, path obstructed`);
         return "obstructed";
       }
 
@@ -173,7 +174,7 @@ class PDDLMove {
           if (freeHere.length > 0) {
             // Attempt pickup via adapter; adapter.pickup() returns collected parcels or []
             const picked = await adapter.pickup();
-            if (picked && picked.length > 0) {
+              if (picked && picked.length > 0) {
               // Update belief and parent state consistently
               for (const p of picked) {
                 try { belief.removeParcel(p.id); } catch (e) { /* ignore */ }
@@ -184,7 +185,7 @@ class PDDLMove {
               }
               this.parent.carried = (this.parent.carried_parcels || []).length;
               this.parent.carriedReward = (this.parent.carried_parcels || []).reduce((s, p) => s + (p.reward || 0), 0);
-              console.log(`PDDLMove: Opportunistic pickup at (${cx},${cy}) -> picked ${picked.map(p=>p.id).join(',')}`);
+              agentLogger.hot('pickup', 2000, `PDDLMove: Opportunistic pickup at (${cx},${cy}) -> picked ${picked.map(p=>p.id).join(',')}`);
             }
           }
         }
@@ -202,12 +203,12 @@ class PDDLMove {
           if (onDelivery) {
             const deliveredIds = (this.parent.carried_parcels || []).map(p => p.id);
             const putResult = await adapter.putdown();
-            if (putResult) {
+              if (putResult) {
               // Clear carried state
               for (const pid of deliveredIds) {
                 try { belief.removeParcel(pid); } catch (e) { /* ignore */ }
               }
-              console.log(`PDDLMove: Opportunistic putdown at (${cx},${cy}) -> delivered ${deliveredIds.join(',')}`);
+              agentLogger.hot('putdown', 2000, `PDDLMove: Opportunistic putdown at (${cx},${cy}) -> delivered ${deliveredIds.join(',')}`);
               this.parent.carried = 0;
               this.parent.carriedReward = 0;
               this.parent.carried_parcels = [];
@@ -223,7 +224,7 @@ class PDDLMove {
     const finalX = Math.round(this.parent.x);
     const finalY = Math.round(this.parent.y);
     if (finalX === tx && finalY === ty) {
-      console.log(`PDDLMove: Successfully reached (${tx}, ${ty})`);
+      if (config.DEBUG) console.log(`PDDLMove: Successfully reached (${tx}, ${ty})`);
       return true;
     }
 

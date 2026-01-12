@@ -1,7 +1,18 @@
 import { DeliverooApi } from "@unitn-asa/deliveroo-js-client";
 import config from "../config/default.js";
+import { defaultLogger } from '../utils/logger.js';
 
-// Inizializza client con host+token; la query name è gestita da token lato server.
-const client = new DeliverooApi(config.host, config.token);
+// Parse CLI arguments to determine which agent we are
+const args = process.argv.slice(2);
+const isSecondAgent = args.includes('--agent') && args[args.indexOf('--agent') + 1] === '2';
 
-export { client };
+// Select token based on agent number
+const token = isSecondAgent ? config.token2 : config.token;
+const agentLabel = isSecondAgent ? 'Agent2' : 'Agent1';
+
+defaultLogger.info(`[CONTEXT] Starting as ${agentLabel}`);
+
+// Inizializza client con host+token
+const client = new DeliverooApi(config.host, token);
+
+export { client, isSecondAgent, agentLabel };

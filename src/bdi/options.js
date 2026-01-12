@@ -1,6 +1,7 @@
 // optionsGeneration: produce intenzioni candidate con scoring multi-pick
 // Versione 3: supporta batch pickup + agent avoidance/contention handling
 import { grid as globalGrid } from "../utils/grid.js";
+import { defaultLogger } from '../utils/logger.js';
 
 // ============================================================================
 // STATO per backoff esplorazione spawner
@@ -329,9 +330,7 @@ function optionsGeneration({ me, belief, grid, push }) {
   const contestedCount = nearbyCandidates.filter(p => p.contested).length;
   const otherAgents = belief.getOtherAgents(me.id);
 
-  console.log('options: carried=', me.carried, '/', capacity, 'carriedReward=', me.carriedReward, 
-    'parcels=', nearbyCandidates.length, contestedCount > 0 ? `(${contestedCount} contested)` : '', 
-    'agents=', otherAgents.length);
+  defaultLogger.hot('optionsSummary', 2000, 'options:', `carried=${me.carried}/${capacity}`, `carriedReward=${me.carriedReward}`, `parcels=${nearbyCandidates.length}${contestedCount>0?` (${contestedCount} contested)`:''}`, `agents=${otherAgents.length}`);
 
   // -------------------------------------------------------------------------
   // OPZIONE 1: DELIVER ORA (se ho pacchi)
@@ -375,22 +374,22 @@ function optionsGeneration({ me, belief, grid, push }) {
   // Caso A: ho una rotta multi-pick con score migliore di consegnare subito
   if (bestRoute.length > 0 && bestRouteScore > deliverNowScore && bestRouteScore > 0) {
     const firstParcel = bestRoute[0];
-    console.log(`-> MULTI-PICK route: ${bestRoute.length} parcels, score=${bestRouteScore.toFixed(2)}`);
-    console.log(`   parcels: ${bestRoute.map(p => p.id).join(' -> ')} -> deliver@(${bestRouteDelivery?.x},${bestRouteDelivery?.y})`);
+    defaultLogger.hot('multiPick', 3000, `-> MULTI-PICK route: ${bestRoute.length} parcels, score=${bestRouteScore.toFixed(2)}`);
+    defaultLogger.hot('multiPickDetails', 5000, `   parcels: ${bestRoute.map(p => p.id).join(' -> ')} -> deliver@(${bestRouteDelivery?.x},${bestRouteDelivery?.y})`);
     push(['go_pick_up', Math.round(firstParcel.x), Math.round(firstParcel.y), firstParcel.id, bestRouteScore]);
     return;
   }
 
   // Caso B: consegna ora è meglio (o l'unica opzione positiva)
   if (me.carried > 0 && nearestDelivery && deliverNowScore > 0) {
-    console.log('-> go_deliver to', nearestDelivery.x, nearestDelivery.y, 'score=', deliverNowScore.toFixed(2));
+    defaultLogger.hot('goDeliver', 3000, `-> go_deliver to ${nearestDelivery.x} ${nearestDelivery.y} score=${deliverNowScore.toFixed(2)}`);
     push(['go_deliver', nearestDelivery.x, nearestDelivery.y, 'deliver', deliverNowScore]);
     return;
   }
 
   // Caso C: ho pacchi ma nessuna opzione positiva -> consegna comunque per non perderli
   if (me.carried > 0 && nearestDelivery) {
-    console.log('-> go_deliver (fallback, avoid losing parcels)');
+    defaultLogger.hot('goDeliverFallback', 5000, '-> go_deliver (fallback, avoid losing parcels)');
     push(['go_deliver', nearestDelivery.x, nearestDelivery.y, 'deliver', 0]);
     return;
   }
@@ -399,13 +398,13 @@ function optionsGeneration({ me, belief, grid, push }) {
   if (belief.parcelSpawners && belief.parcelSpawners.length > 0) {
     // Evita di riproporre esplorazioni mentre l'explore è in cooldown
     if (belief?.isOnCooldown && belief.isOnCooldown('parcel', 'explore')) {
-      console.log('-> explore target is on cooldown, skipping');
+      defaultLogger.hot('exploreCooldown', 5000, '-> explore target is on cooldown, skipping');
     } else {
       const result = chooseBestSpawner(belief.parcelSpawners, me.x, me.y, otherAgents, g, belief);
       if (result && result.spawner) {
         const escapeMsg = result.escaped ? ' [ESCAPE]' : '';
         const avoidMsg = result.nearbyAgents > 0 ? ` (avoiding ${result.nearbyAgents} agents)` : '';
-        console.log('-> go_to spawner', result.spawner.x, result.spawner.y + escapeMsg + avoidMsg);
+        defaultLogger.hot('goToSpawner', 3000, `-> go_to spawner ${result.spawner.x} ${result.spawner.y}${escapeMsg}${avoidMsg}`);
         push(['go_pick_up', result.spawner.x, result.spawner.y, 'explore', 0]);
         return;
       }
@@ -413,7 +412,7 @@ function optionsGeneration({ me, belief, grid, push }) {
   }
 
   // Caso E: fallback totale
-  console.log('-> go_random');
+  defaultLogger.hot('goRandom', 5000, '-> go_random');
   push(['go_random', me.x ?? 0, me.y ?? 0, 'rnd', 0]);
 }
 
