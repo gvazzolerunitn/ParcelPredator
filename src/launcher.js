@@ -20,6 +20,7 @@ me.belief = belief;
 me.optionsGeneration = optionsGeneration;
 me.carried_parcels = []; // Lista dei pacchi trasportati {id, reward}
 me.isSecondAgent = isSecondAgent;
+me.comm = comm; // Reference to comm module for claim coordination
 
 // Hook events
 adapter.onConnect(async () => {
@@ -35,7 +36,7 @@ adapter.onDisconnect(() => defaultLogger.info(`[${agentLabel}] disconnected`));
 
 adapter.onYou(({ id, name, x, y, score, carried }) => {
   me.setValues({ id, name, x, y, score, carried });
-  optionsGeneration({ me, belief, grid: gridRef, push: (p)=>me.push(p) });
+  optionsGeneration({ me, belief, grid: gridRef, push: (p)=>me.push(p), comm });
 });
 
 adapter.onMap((w, h, tiles) => {
@@ -61,22 +62,17 @@ adapter.onParcels((parcels) => {
     comm.sendParcels(parcels);
   }
   
-  optionsGeneration({ me, belief, grid: gridRef, push: (p)=>me.push(p) });
+  optionsGeneration({ me, belief, grid: gridRef, push: (p)=>me.push(p), comm });
 });
 
 adapter.onAgents((agents) => {
-  belief.syncAgents(agents);
+  // Pass our id to avoid overwriting our own entry in belief
+  belief.syncAgents(agents, me.id);
   
-  // In DUAL mode, send agents info to friend (include self)
+  // In DUAL mode, send agents info to friend (exclude self)
   if (config.DUAL && comm.isReady()) {
-    const agentsWithMe = [...agents, {
-      id: me.id,
-      name: me.name,
-      x: Math.round(me.x),
-      y: Math.round(me.y),
-      score: me.score
-    }];
-    comm.sendAgents(agentsWithMe);
+    const agentsToSend = agents.filter(a => a.id !== me.id);
+    comm.sendAgents(agentsToSend);
   }
 });
 

@@ -104,9 +104,11 @@ class Belief {
   getParcelsArray() { return Array.from(this.parcels.values()); }
 
   // Sincronizza agenti con timestamp
-  syncAgents(agentsArray) {
+  // Optional `myId` parameter: if provided, skip updating the entry for `myId`
+  syncAgents(agentsArray, myId = undefined) {
     const now = Date.now();
     for (const a of agentsArray) {
+      if (a && a.id === myId) continue; // Do not overwrite our own agent entry
       this.agents.set(a.id, {
         id: a.id,
         name: a.name,
@@ -397,6 +399,48 @@ class Belief {
       }
     }
     return null;
+  }
+
+  /**
+   * Determine if we should yield a parcel to another agent's claim.
+   * Priority rules:
+   * 1. Higher score wins
+   * 2. If scores are equal, lower agentId (lexicographic) wins
+   * @param {string} parcelId - parcel id
+   * @param {string} myId - our agent id
+   * @param {number} myScore - our score for this parcel
+   * @returns {object|null} - { yieldTo: agentId, reason: string } if we should yield, null otherwise
+   */
+  shouldYieldClaim(parcelId, myId, myScore) {
+    const claims = this.getClaims();
+    for (const [agentId, claim] of claims) {
+      if (agentId === myId) continue; // Skip our own claim
+      if (claim.action === 'go_pick_up' && claim.targetId === parcelId) {
+        const theirScore = claim.score || 0;
+        // Higher score wins
+        if (theirScore > myScore) {
+          return { yieldTo: agentId, reason: 'higher score' };
+        }
+        // Equal score: lower agentId wins (tie-breaker)
+        if (theirScore === myScore && agentId < myId) {
+          return { yieldTo: agentId, reason: 'tie-break (agentId)' };
+        }
+      }
+    }
+    return null; // We have priority or no competing claim
+  }
+
+  /**
+   * Clear our own claim for a parcel (after successful pickup or abandonment)
+   * @param {string} myId - our agent id
+   * @param {string} parcelId - parcel id
+   */
+  clearMyClaim(myId, parcelId) {
+    if (!this._claims) return;
+    const myClaim = this._claims.get(myId);
+    if (myClaim && myClaim.targetId === parcelId) {
+      this._claims.delete(myId);
+    }
   }
 
   /**

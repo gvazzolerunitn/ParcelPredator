@@ -18,7 +18,7 @@ export default {
   DUAL: true,
   
   // PDDL Planning options
-  usePddl: true,        // Set to true to enable PDDL-based movement planning
+  usePddl: false,        // Set to true to enable PDDL-based movement planning
   solver: "local",       // "local" = fast A* solver | "online" = @unitn-asa/pddl-client
   
   // Retry/Backoff settings

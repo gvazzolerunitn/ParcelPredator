@@ -92,7 +92,24 @@ class Comm {
       return;
     }
 
-    const { header, content } = msg;
+    let { header, content } = msg;
+    // Defensive sanitization: strip any entries referencing our own id (silently)
+    try {
+      if (header === 'INFO_AGENTS' && Array.isArray(content) && this.me) {
+        content = content.filter(a => a && a.id !== this.me.id);
+        msg = new Msg(header, content);
+      } else if (header === 'INFO_AGENTS_DELTA' && content && this.me) {
+        const delta = {
+          added: (content.added || []).filter(a => a && a.id !== this.me.id),
+          updated: (content.updated || []).filter(a => a && a.id !== this.me.id),
+          removed: (content.removed || []).filter(id => id !== this.me.id)
+        };
+        content = delta;
+        msg = new Msg(header, content);
+      }
+    } catch (e) {
+      // ignore errors
+    }
     
     // Handle handshake internally
     if (header === 'HANDSHAKE') {

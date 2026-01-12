@@ -23,7 +23,13 @@ class Agent {
   }
 
   setValues({ id, name, x, y, score, carried }) {
-    this.id = id; this.name = name; this.x = x; this.y = y; this.score = score;
+    this.id = id; 
+    this.name = name; 
+    // Store ROUNDED coordinates for grid-based logic (like ASAPlanners)
+    // This prevents issues with fractional positions during movement
+    this.x = Math.round(x); 
+    this.y = Math.round(y); 
+    this.score = score;
     if (carried !== undefined) this.carried = carried;
   }
 

@@ -2,6 +2,7 @@ import { adapter } from "../../client/adapter.js";
 import { MoveBfs } from "./moveBfs.js";
 import { PDDLMove } from "./pddlMove.js";
 import config from "../../config/default.js";
+import { agentLogger } from '../../utils/logger.js';
 
 // Retry/backoff settings from config
 const PLAN_MAX_ATTEMPTS = config.planMaxAttempts ?? 3;
@@ -101,6 +102,17 @@ class GoPickUp {
         // Parcel already collected (likely via opportunistic pickup)
         return true;
       }
+      
+      // Check if friend has a higher-priority claim — yield if so
+      // Retrieve our score from the current intention predicate
+      const myScore = this.parent.intentions?.[0]?.predicate?.[4] || 0;
+      const yieldInfo = this.parent.belief.shouldYieldClaim(id, this.parent.id, myScore);
+      if (yieldInfo) {
+        agentLogger.hot('yieldPickup', 3000, `GoPickUp: Yielding parcel ${id} to ${yieldInfo.yieldTo} (${yieldInfo.reason})`);
+        // Clear our claim and abort
+        this.parent.belief.clearMyClaim(this.parent.id, id);
+        throw new Error("yielded to friend");
+      }
     }
 
     const res = await adapter.pickup();
@@ -132,6 +144,8 @@ class GoPickUp {
       // Clear cooldown if any
       if (this.parent.belief) {
         this.parent.belief.clearCooldown('parcel', p.id);
+        // Clear our claim for this parcel
+        this.parent.belief.clearMyClaim(this.parent.id, p.id);
       }
     }
     // Aggiorna i contatori basati sulla lista cumulativa
@@ -146,7 +160,8 @@ class GoPickUp {
         me: this.parent,
         belief: this.parent.belief,
         grid: this.parent.grid,
-        push: (p) => this.parent.push(p)
+        push: (p) => this.parent.push(p),
+        comm: this.parent.comm
       });
     }
     return true;

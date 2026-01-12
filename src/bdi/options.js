@@ -302,7 +302,7 @@ function buildGreedyRoute(start, candidates, deliveryZones, me, g, maxPicks) {
 // MAIN: optionsGeneration
 // ============================================================================
 
-function optionsGeneration({ me, belief, grid, push }) {
+function optionsGeneration({ me, belief, grid, push, comm }) {
   const g = grid || globalGrid;
   if (!g || me.x === undefined || me.y === undefined) return;
 
@@ -374,10 +374,25 @@ function optionsGeneration({ me, belief, grid, push }) {
   // Caso A: ho una rotta multi-pick con score migliore di consegnare subito
   if (bestRoute.length > 0 && bestRouteScore > deliverNowScore && bestRouteScore > 0) {
     const firstParcel = bestRoute[0];
-    defaultLogger.hot('multiPick', 3000, `-> MULTI-PICK route: ${bestRoute.length} parcels, score=${bestRouteScore.toFixed(2)}`);
-    defaultLogger.hot('multiPickDetails', 5000, `   parcels: ${bestRoute.map(p => p.id).join(' -> ')} -> deliver@(${bestRouteDelivery?.x},${bestRouteDelivery?.y})`);
-    push(['go_pick_up', Math.round(firstParcel.x), Math.round(firstParcel.y), firstParcel.id, bestRouteScore]);
-    return;
+    
+    // Check if friend has a higher-priority claim on this parcel
+    const yieldInfo = belief.shouldYieldClaim(firstParcel.id, me.id, bestRouteScore);
+    if (yieldInfo) {
+      defaultLogger.hot('yieldClaim', 3000, `-> Yielding parcel ${firstParcel.id} to friend (${yieldInfo.reason})`);
+      // Skip this parcel and try next best option or fallback
+    } else {
+      // Register our claim locally and send to friend
+      const claim = ['go_pick_up', Math.round(firstParcel.x), Math.round(firstParcel.y), firstParcel.id, bestRouteScore];
+      belief.registerClaim(me.id, claim);
+      if (comm && comm.isReady()) {
+        comm.sendIntention(claim);
+      }
+      
+      defaultLogger.hot('multiPick', 3000, `-> MULTI-PICK route: ${bestRoute.length} parcels, score=${bestRouteScore.toFixed(2)}`);
+      defaultLogger.hot('multiPickDetails', 5000, `   parcels: ${bestRoute.map(p => p.id).join(' -> ')} -> deliver@(${bestRouteDelivery?.x},${bestRouteDelivery?.y})`);
+      push(['go_pick_up', Math.round(firstParcel.x), Math.round(firstParcel.y), firstParcel.id, bestRouteScore]);
+      return;
+    }
   }
 
   // Caso B: consegna ora è meglio (o l'unica opzione positiva)
