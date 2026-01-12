@@ -189,13 +189,33 @@ async function fastLocalSolver(domain, problem) {
  * Requires @unitn-asa/pddl-client to be installed
  * @param {string} domain - PDDL domain string
  * @param {string} problem - PDDL problem string
- * @returns {Promise<array>} Array of actions or empty array
+ * @returns {Promise<array>} Array of actions [{action: 'up'}, ...] or empty array
  */
 async function onlineSolverFallback(domain, problem) {
   try {
     const { onlineSolver } = await import('@unitn-asa/pddl-client');
-    const plan = await onlineSolver(domain, problem);
-    return plan || [];
+    const rawPlan = await onlineSolver(domain, problem);
+    if (!rawPlan || rawPlan.length === 0) return [];
+    
+    // Normalize plan format: online solver returns objects like {action: 'MOVE-RIGHT', args: [...]}
+    // or sometimes strings like 'MOVE-RIGHT TILE_1_2 TILE_1_3'
+    // We need to convert to [{action: 'right'}, {action: 'up'}, ...]
+    const normalized = rawPlan.map(step => {
+      let actionName;
+      if (typeof step === 'string') {
+        // Format: "MOVE-RIGHT TILE_X_Y TILE_X_Y" or "MOVE-RIGHT,TILE_X_Y,TILE_X_Y"
+        actionName = step.split(/[\s,]+/)[0];
+      } else if (step && step.action) {
+        actionName = step.action;
+      } else {
+        return null;
+      }
+      // Convert MOVE-RIGHT/move-right -> right, MOVE-UP/move-up -> up, etc.
+      const direction = actionName.toLowerCase().replace('move-', '').replace('move_', '');
+      return { action: direction };
+    }).filter(s => s !== null);
+    
+    return normalized;
   } catch (err) {
     console.error('onlineSolver not available or failed:', err.message);
     return [];

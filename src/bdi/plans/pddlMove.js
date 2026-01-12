@@ -150,11 +150,11 @@ class PDDLMove {
         throw new Error("stopped");
       }
 
-      // Extract action (handle both {action: 'up'} and 'move-up' formats)
+      // Extract action (handle both {action: 'up'} and 'MOVE-UP' formats)
       let action = step.action || step;
       if (typeof action === "string") {
-        // Convert PDDL action names to simple directions
-        action = action.replace("move-", "").toLowerCase();
+        // Convert PDDL action names to simple directions (handle uppercase and lowercase)
+        action = action.toLowerCase().replace('move-', '').replace('move_', '');
       }
 
       const moveOk = await this.moveWithRetry(action);
