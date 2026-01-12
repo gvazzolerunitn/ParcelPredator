@@ -17,15 +17,16 @@
 - **Robustness**: GoPickUp treats missing parcels as success (already picked); GoDeliver treats `carried==0` as success (opportunistic putdown occurred); macro-retry with exponential backoff on failures; per-target cooldowns prevent infinite loops.
 - **Validation**: tested on maps ranging 20×20 (214 spawners) to 60×60 (2609 spawners); confirmed anti-loop mechanisms work, opportunistic actions increase throughput, logs clean and interpretable.
 
-### Part 2 — Multi-agent extension (planned steps)
-- 1. Shared/observable state and coordination primitives
-	- refine belief sharing (what is safe to broadcast) or implement decentralized heuristics
-- 2. Contention resolution strategies
-	- contention-aware scoring, auctions, or soft-reservations for spawners/parcels
-- 3. Communication & negotiation (optional)
-	- basic message types to announce intent, reserve parcels, or request handoffs
-- 4. Multi-agent experiments
-	- benchmarks comparing centralized vs decentralized strategies and tuning contention penalties
+### Part 2 — Multi-agent extension (implemented)
+- **Communication scaffold:** handshake-based friend discovery, `INFO_PARCELS` / `INFO_PARCELS_DELTA`, `INFO_AGENTS` / `INFO_AGENTS_DELTA`, `INTENTION` and `COLLISION` message types. Implements diff-only sync with periodic full snapshots.
+- **Handshake & readiness:** automatic friendId discovery and handshake protocol; `Comm.isReady()` gating before sending coordination messages.
+- **Claim-based coordination:** reservation/claim API (`registerClaim`, `getClaims`, `clearMyClaim`) with 3s TTL; `shouldYieldClaim()` implements priority rules (higher score wins, tie-breaker by lexicographic `agentId`).
+- **Intent sharing & negotiation:** agents send intentions (`sendIntention`) before committing to pickup; incoming intentions are registered as claims to avoid contention.
+- **Claim-before-pickup:** `optionsGeneration()` checks `shouldYieldClaim()` before claiming a parcel; if proceeding, the agent registers the claim locally and broadcasts it to the friend, then pushes the `go_pick_up` intention.
+- **Collision protocol:** simple exchange messages (`COLLISION`, `MOVE`, `TAKE`, `DROP`, `END`) and handlers to coordinate ad-hoc parcel handoffs or temporary moves to resolve deadlocks.
+- **Defensive consistency measures:** multiple layers to avoid position overwrites — sender excludes self from agents broadcasts, receiver sanitizes incoming agent lists/deltas, and `belief.syncAgents(..., myId)` skips updating our own entry.
+- **Grid-consistent positions:** agent positions are rounded for grid logic (prevents transient fractional-position artefacts) and options generation avoids creating new intentions while the agent is mid-move.
+- **Throttled logging & comm summaries:** periodic condensed communication summaries to avoid console flooding.
 
 ## Repository layout (key files)
 - `src/launcher.js` — agent bootstrap and adapter wiring
