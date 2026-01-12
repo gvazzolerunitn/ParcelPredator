@@ -93,7 +93,11 @@ class GoDeliver {
       }
     }
     
-    if (this.parent.carried <= 0) throw new Error("no parcels to deliver");
+    // Se non ci sono pacchi da consegnare, potrebbe essere stato già fatto
+    // un opportunistic putdown durante il movimento — considera successo
+    if (this.parent.carried <= 0) {
+      return true;
+    }
 
     // Cattura gli ID dei pacchi che stiamo per consegnare (evita race con onParcels)
     const deliveredIdsArr = (this.parent.carried_parcels || []).map(p => p.id);

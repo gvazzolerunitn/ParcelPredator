@@ -93,12 +93,28 @@ class GoPickUp {
     }
     
     if (this.stopped) throw new Error("stopped");
+    // Before attempting pickup, check belief: if the target parcel id is no longer
+    // present in the belief (someone or we already picked it), consider success.
+    if (id && id !== 'explore' && this.parent.belief) {
+      const free = this.parent.belief.getFreeParcels().some(p => p.id === id);
+      if (!free) {
+        // Parcel already collected (likely via opportunistic pickup)
+        return true;
+      }
+    }
+
     const res = await adapter.pickup();
-    
+
     // Se è un'esplorazione (id='explore') e non c'è niente, non è un errore
     if (!res || res.length === 0) {
       if (id === 'explore') {
-        // Esplorazione senza pacchi: normale, non loggare come errore
+        // Esplorazione senza pacchi: imposta cooldown su questa coordinata
+        // per evitare di riselezionarla subito
+        const cx = Math.round(x);
+        const cy = Math.round(y);
+        if (this.parent.belief) {
+          this.parent.belief.setCooldown('tile', `${cx},${cy}`, TARGET_COOLDOWN_MS);
+        }
         return false;
       }
       throw new Error("pickup failed " + id);

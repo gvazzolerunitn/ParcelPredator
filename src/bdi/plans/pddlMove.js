@@ -162,6 +162,61 @@ class PDDLMove {
         console.log(`PDDLMove: Move '${action}' failed after ${MICRO_RETRIES + 1} attempts, path obstructed`);
         return "obstructed";
       }
+
+      // Opportunistic pickup: if after this move there are free parcels on our tile,
+      // attempt to pick them up immediately to avoid passing them and coming back.
+      try {
+        if (belief && typeof belief.getFreeParcels === 'function') {
+          const cx = Math.round(this.parent.x);
+          const cy = Math.round(this.parent.y);
+          const freeHere = belief.getFreeParcels().filter(p => Math.round(p.x) === cx && Math.round(p.y) === cy);
+          if (freeHere.length > 0) {
+            // Attempt pickup via adapter; adapter.pickup() returns collected parcels or []
+            const picked = await adapter.pickup();
+            if (picked && picked.length > 0) {
+              // Update belief and parent state consistently
+              for (const p of picked) {
+                try { belief.removeParcel(p.id); } catch (e) { /* ignore */ }
+                this.parent.carried_parcels = this.parent.carried_parcels || [];
+                if (!this.parent.carried_parcels.some(cp => cp.id === p.id)) {
+                  this.parent.carried_parcels.push({ id: p.id, reward: p.reward || 0 });
+                }
+              }
+              this.parent.carried = (this.parent.carried_parcels || []).length;
+              this.parent.carriedReward = (this.parent.carried_parcels || []).reduce((s, p) => s + (p.reward || 0), 0);
+              console.log(`PDDLMove: Opportunistic pickup at (${cx},${cy}) -> picked ${picked.map(p=>p.id).join(',')}`);
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal: pickup failed or adapter not available, continue execution
+      }
+
+      // Opportunistic putdown: if carrying parcels and standing on a delivery tile,
+      // deliver immediately to avoid passing delivery zones without depositing.
+      try {
+        if (belief && belief.deliveryZones && this.parent.carried > 0) {
+          const cx = Math.round(this.parent.x);
+          const cy = Math.round(this.parent.y);
+          const onDelivery = belief.deliveryZones.some(d => d.x === cx && d.y === cy);
+          if (onDelivery) {
+            const deliveredIds = (this.parent.carried_parcels || []).map(p => p.id);
+            const putResult = await adapter.putdown();
+            if (putResult) {
+              // Clear carried state
+              for (const pid of deliveredIds) {
+                try { belief.removeParcel(pid); } catch (e) { /* ignore */ }
+              }
+              console.log(`PDDLMove: Opportunistic putdown at (${cx},${cy}) -> delivered ${deliveredIds.join(',')}`);
+              this.parent.carried = 0;
+              this.parent.carriedReward = 0;
+              this.parent.carried_parcels = [];
+            }
+          }
+        }
+      } catch (e) {
+        // Non-fatal: putdown failed, continue execution
+      }
     }
 
     // Verify we reached destination

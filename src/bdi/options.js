@@ -7,6 +7,7 @@ import { grid as globalGrid } from "../utils/grid.js";
 // ============================================================================
 const recentlyVisitedSpawners = new Map(); // key: "x,y" -> timestamp ultimo tentativo
 const SPAWNER_BACKOFF_MS = 3000; // Non tornare sullo stesso spawner per 3 secondi
+const AREA_BACKOFF_RADIUS = 2; // Penalizza anche tile vicine (Manhattan radius)
 
 // ============================================================================
 // HELPERS per Multi-Pick e Agent Avoidance
@@ -86,21 +87,54 @@ function getNearbyFreeParcels(belief, x, y, g, myId, K = 10) {
 }
 
 /**
- * Sceglie lo spawner migliore evitando zone con altri agenti e spawner visitati di recente
+ * Verifica se uno spawner è in backoff (diretto o per prossimità area)
  */
-function chooseBestSpawner(spawners, myX, myY, otherAgents, g) {
+function isInAreaBackoff(spawnerX, spawnerY, now) {
+  for (const [key, timestamp] of recentlyVisitedSpawners) {
+    if ((now - timestamp) >= SPAWNER_BACKOFF_MS) continue; // backoff scaduto
+    const [vx, vy] = key.split(',').map(Number);
+    const dist = Math.abs(spawnerX - vx) + Math.abs(spawnerY - vy);
+    if (dist <= AREA_BACKOFF_RADIUS) return true;
+  }
+  return false;
+}
+
+/**
+ * Sceglie lo spawner migliore evitando zone con altri agenti e spawner visitati di recente.
+ * Supporta stochastic escape: con probabilità `escapeProbability`, sceglie uno spawner distante.
+ * Rispetta anche i cooldown per-tile impostati dalla belief.
+ */
+function chooseBestSpawner(spawners, myX, myY, otherAgents, g, belief = null, escapeProbability = 0.15) {
   if (spawners.length === 0) return null;
   
   const now = Date.now();
+  
+  // Stochastic escape: con probabilità p, scegli uno spawner lontano per uscire da cicli locali
+  if (Math.random() < escapeProbability) {
+    // Ordina spawner per distanza decrescente e scegline uno tra i più lontani
+    const sorted = [...spawners]
+      .map(s => ({ ...s, dist: g.manhattanDistance(myX, myY, s.x, s.y) }))
+      .sort((a, b) => b.dist - a.dist);
+    // Scegli casualmente tra il top 20% più lontani
+    const topN = Math.max(1, Math.floor(sorted.length * 0.2));
+    const chosen = sorted[Math.floor(Math.random() * topN)];
+    console.log(`-> [ESCAPE] jumping to distant spawner (${chosen.x},${chosen.y}) dist=${chosen.dist}`);
+    recentlyVisitedSpawners.set(`${chosen.x},${chosen.y}`, now);
+    return { spawner: chosen, nearbyAgents: otherAgents.length, escaped: true };
+  }
+  
   let bestSpawner = null;
   let bestScore = -Infinity;
   
   for (const spawner of spawners) {
-    // Salta spawner visitati di recente (backoff)
-    const key = `${spawner.x},${spawner.y}`;
-    const lastVisit = recentlyVisitedSpawners.get(key);
-    if (lastVisit && (now - lastVisit) < SPAWNER_BACKOFF_MS) {
-      continue; // Ancora in backoff
+    // Salta spawner in area backoff (inclusi vicini)
+    if (isInAreaBackoff(spawner.x, spawner.y, now)) {
+      continue;
+    }
+    
+    // Salta spawner con cooldown per-tile (esplorazione fallita di recente)
+    if (belief && belief.isOnCooldown && belief.isOnCooldown('tile', `${spawner.x},${spawner.y}`)) {
+      continue;
     }
     
     const myDist = g.manhattanDistance(myX, myY, spawner.x, spawner.y);
@@ -126,14 +160,12 @@ function chooseBestSpawner(spawners, myX, myY, otherAgents, g) {
   
   // Se tutti gli spawner sono in backoff, scegli quello con backoff più vecchio
   if (!bestSpawner && spawners.length > 0) {
-    let oldestKey = null;
     let oldestTime = Infinity;
     for (const spawner of spawners) {
       const key = `${spawner.x},${spawner.y}`;
       const lastVisit = recentlyVisitedSpawners.get(key) || 0;
       if (lastVisit < oldestTime) {
         oldestTime = lastVisit;
-        oldestKey = key;
         bestSpawner = spawner;
       }
     }
@@ -145,7 +177,7 @@ function chooseBestSpawner(spawners, myX, myY, otherAgents, g) {
     recentlyVisitedSpawners.set(key, now);
   }
   
-  return { spawner: bestSpawner, nearbyAgents: otherAgents.length };
+  return { spawner: bestSpawner, nearbyAgents: otherAgents.length, escaped: false };
 }
 
 /**
@@ -345,8 +377,6 @@ function optionsGeneration({ me, belief, grid, push }) {
     const firstParcel = bestRoute[0];
     console.log(`-> MULTI-PICK route: ${bestRoute.length} parcels, score=${bestRouteScore.toFixed(2)}`);
     console.log(`   parcels: ${bestRoute.map(p => p.id).join(' -> ')} -> deliver@(${bestRouteDelivery?.x},${bestRouteDelivery?.y})`);
-    // Push solo il primo pickup; dopo il pickup optionsGeneration verrà richiamata
-    // e deciderà se continuare la rotta o cambiare piano
     push(['go_pick_up', Math.round(firstParcel.x), Math.round(firstParcel.y), firstParcel.id, bestRouteScore]);
     return;
   }
@@ -371,10 +401,11 @@ function optionsGeneration({ me, belief, grid, push }) {
     if (belief?.isOnCooldown && belief.isOnCooldown('parcel', 'explore')) {
       console.log('-> explore target is on cooldown, skipping');
     } else {
-      const result = chooseBestSpawner(belief.parcelSpawners, me.x, me.y, otherAgents, g);
+      const result = chooseBestSpawner(belief.parcelSpawners, me.x, me.y, otherAgents, g, belief);
       if (result && result.spawner) {
+        const escapeMsg = result.escaped ? ' [ESCAPE]' : '';
         const avoidMsg = result.nearbyAgents > 0 ? ` (avoiding ${result.nearbyAgents} agents)` : '';
-        console.log('-> go_to spawner', result.spawner.x, result.spawner.y + avoidMsg);
+        console.log('-> go_to spawner', result.spawner.x, result.spawner.y + escapeMsg + avoidMsg);
         push(['go_pick_up', result.spawner.x, result.spawner.y, 'explore', 0]);
         return;
       }

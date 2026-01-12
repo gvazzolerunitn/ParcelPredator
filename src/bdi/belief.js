@@ -171,7 +171,7 @@ class Belief {
     const fullKey = `${kind}:${key}`;
     const until = Date.now() + ms;
     this._cooldowns.set(fullKey, until);
-    console.log(`Cooldown set: ${fullKey} until ${new Date(until).toISOString().slice(11, 19)}`);
+    // Verbose cooldown logs removed for cleaner output
   }
 
   /**
