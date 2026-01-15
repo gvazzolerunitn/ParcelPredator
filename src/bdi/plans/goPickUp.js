@@ -1,160 +1,131 @@
+/**
+ * goPickUp.js - Pickup Plan
+ * 
+ * Moves to parcel location and picks it up.
+ * Includes retry logic with exponential backoff.
+ */
+
 import { adapter } from "../../client/adapter.js";
 import { MoveBfs } from "./moveBfs.js";
 import { PDDLMove } from "./pddlMove.js";
 import config from "../../config/default.js";
 import { agentLogger } from '../../utils/logger.js';
 
-// Retry/backoff settings from config
-const PLAN_MAX_ATTEMPTS = config.planMaxAttempts ?? 3;
-const BACKOFF_BASE_MS = config.planBackoffBaseMs ?? 200;
-const BACKOFF_JITTER_MS = config.planBackoffJitterMs ?? 100;
-const TARGET_COOLDOWN_MS = config.targetCooldownMs ?? 3000;
+const MAX_ATTEMPTS = 3;
+const BACKOFF_BASE_MS = 200;
+const COOLDOWN_MS = 3000;
 
-/**
- * Helper: sleep for ms milliseconds
- */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Helper: compute backoff with jitter
- */
 function getBackoff(attempt) {
-  const base = BACKOFF_BASE_MS * Math.pow(2, attempt);
-  const jitter = Math.floor(Math.random() * BACKOFF_JITTER_MS);
-  return base + jitter;
+  return BACKOFF_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
 }
 
 class GoPickUp {
   static isApplicableTo(desire) { return desire === 'go_pick_up'; }
-  constructor(parent) { this.parent = parent; this.stopped = false; }
+  
+  constructor(parent) {
+    this.parent = parent;
+    this.stopped = false;
+  }
+  
   stop() { this.stopped = true; }
+  
   async execute(_desire, x, y, id) {
     if (this.stopped) throw new Error("stopped");
     
     const tx = Math.round(x);
     const ty = Math.round(y);
     
-    // Check if target is on cooldown
-    if (this.parent.belief && this.parent.belief.isOnCooldown('parcel', id)) {
-      console.log(`GoPickUp: Parcel ${id} is on cooldown, skipping`);
+    // Skip if target is on cooldown
+    if (this.parent.belief?.isOnCooldown('parcel', id)) {
+      agentLogger.hot('cooldown', 3000, 'GoPickUp: Parcel on cooldown, skipping');
       throw new Error("target on cooldown");
     }
     
-    // Macro-retry loop for movement with replan
-    let moveResult = true;
+    // Move to target with retry
     if (Math.round(this.parent.x) !== tx || Math.round(this.parent.y) !== ty) {
-      for (let attempt = 0; attempt < PLAN_MAX_ATTEMPTS; attempt++) {
+      let moveResult = true;
+      
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (this.stopped) throw new Error("stopped");
         
-        const mover = (config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent));
+        const mover = config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent);
         
-        // Wrap in try-catch to handle 'no plan found' and other errors
         try {
           moveResult = await mover.execute('go_to', tx, ty, this.parent.belief);
         } catch (err) {
-          // Treat 'no plan found' as retriable (like obstructed)
-          if (err.message === 'no plan found' || err.message === 'domain not found') {
-            moveResult = 'no-plan';
-          } else if (err.message === 'stopped') {
-            throw err; // Re-throw stop signals
-          } else {
-            console.log(`GoPickUp: Unexpected error: ${err.message}`);
-            moveResult = 'error';
-          }
+          if (err.message === 'stopped') throw err;
+          moveResult = 'error';
         }
         
-        if (moveResult === true) {
-          // Success - clear any cooldown on this target
+        if (moveResult === true) break;
+        
+        // Retry on failure
+        if (attempt < MAX_ATTEMPTS - 1) {
+          const backoff = getBackoff(attempt);
+          agentLogger.hot('retry', 3000, 'GoPickUp: Movement failed, retrying in ' + backoff + 'ms');
+          await sleep(backoff);
+        } else {
+          // All retries exhausted
           if (this.parent.belief) {
-            this.parent.belief.clearCooldown('parcel', id);
+            this.parent.belief.setCooldown('parcel', id, COOLDOWN_MS);
           }
-          break;
-        }
-        
-        // Handle retriable failures: obstructed, no-plan, error
-        if (moveResult === "obstructed" || moveResult === "no-plan" || moveResult === "error") {
-          const reason = moveResult === "obstructed" ? "path obstructed" : 
-                         moveResult === "no-plan" ? "no plan found" : "error";
-          if (attempt < PLAN_MAX_ATTEMPTS - 1) {
-            const backoff = getBackoff(attempt);
-            console.log(`GoPickUp: ${reason}, attempt ${attempt + 1}/${PLAN_MAX_ATTEMPTS} — retrying in ${backoff}ms`);
-            await sleep(backoff);
-          } else {
-            // All retries exhausted - set cooldown
-            console.log(`GoPickUp: All ${PLAN_MAX_ATTEMPTS} attempts failed for parcel ${id} (${reason})`);
-            if (this.parent.belief) {
-              this.parent.belief.setCooldown('parcel', id, TARGET_COOLDOWN_MS);
-            }
-            throw new Error("pickup failed " + id);
-          }
+          throw new Error("pickup failed");
         }
       }
     }
     
     if (this.stopped) throw new Error("stopped");
-    // Before attempting pickup, check belief: if the target parcel id is no longer
-    // present in the belief (someone or we already picked it), consider success.
+    
+    // Check if parcel still available
     if (id && id !== 'explore' && this.parent.belief) {
-      const free = this.parent.belief.getFreeParcels().some(p => p.id === id);
-      if (!free) {
-        // Parcel already collected (likely via opportunistic pickup)
-        return true;
-      }
+      const stillFree = this.parent.belief.getFreeParcels().some(p => p.id === id);
+      if (!stillFree) return true; // Already picked by someone
       
-      // Check if friend has a higher-priority claim — yield if so
-      // Retrieve our score from the current intention predicate
+      // Yield to friend if they have higher priority claim
       const myScore = this.parent.intentions?.[0]?.predicate?.[4] || 0;
       const yieldInfo = this.parent.belief.shouldYieldClaim(id, this.parent.id, myScore);
       if (yieldInfo) {
-        agentLogger.hot('yieldPickup', 3000, `GoPickUp: Yielding parcel ${id} to ${yieldInfo.yieldTo} (${yieldInfo.reason})`);
-        // Clear our claim and abort
+        agentLogger.hot('yield', 3000, 'GoPickUp: Yielding to friend');
         this.parent.belief.clearMyClaim(this.parent.id, id);
-        throw new Error("yielded to friend");
+        throw new Error("yielded");
       }
     }
 
+    // Pickup action
     const res = await adapter.pickup();
 
-    // Se è un'esplorazione (id='explore') e non c'è niente, non è un errore
     if (!res || res.length === 0) {
       if (id === 'explore') {
-        // Esplorazione senza pacchi: imposta cooldown su questa coordinata
-        // per evitare di riselezionarla subito
-        const cx = Math.round(x);
-        const cy = Math.round(y);
+        // Exploration with no parcel - set tile cooldown
         if (this.parent.belief) {
-          this.parent.belief.setCooldown('tile', `${cx},${cy}`, TARGET_COOLDOWN_MS);
+          this.parent.belief.setCooldown('tile', tx + ',' + ty, COOLDOWN_MS);
         }
         return false;
       }
-      throw new Error("pickup failed " + id);
+      throw new Error("pickup failed");
     }
     
-    // Aggiorna stato agente — integra i pacchi appena raccolti nella lista di quelli trasportati
-    // (adapter.pickup potrebbe ritornare solo i pacchi raccolti in questa azione)
+    // Update agent state
     this.parent.carried_parcels = this.parent.carried_parcels || [];
     for (const p of res) {
       if (!this.parent.carried_parcels.some(cp => cp.id === p.id)) {
         this.parent.carried_parcels.push({ id: p.id, reward: p.reward || 0 });
       }
-      // Rimuovi il pacco dalla belief (non è più disponibile sulla mappa)
       this.parent.belief.removeParcel(p.id);
-      // Clear cooldown if any
-      if (this.parent.belief) {
-        this.parent.belief.clearCooldown('parcel', p.id);
-        // Clear our claim for this parcel
-        this.parent.belief.clearMyClaim(this.parent.id, p.id);
-      }
+      this.parent.belief.clearCooldown('parcel', p.id);
+      this.parent.belief.clearMyClaim(this.parent.id, p.id);
     }
-    // Aggiorna i contatori basati sulla lista cumulativa
-    this.parent.carried = this.parent.carried_parcels.length;
-    this.parent.carriedReward = this.parent.carried_parcels.reduce((sum, p) => sum + (p.reward || 0), 0);
-
-    console.log('Picked up parcels, now carrying:', this.parent.carried, '| IDs:', this.parent.carried_parcels.map(p => p.id).join(','));
     
-    // Chiama immediatamente optionsGeneration per decidere il prossimo passo
+    this.parent.carried = this.parent.carried_parcels.length;
+    this.parent.carriedReward = this.parent.carried_parcels.reduce((s, p) => s + (p.reward || 0), 0);
+
+    agentLogger.hot('pickup', 2000, 'Picked up parcels, carrying: ' + this.parent.carried);
+    
+    // Trigger new intention generation
     if (this.parent.optionsGeneration) {
       this.parent.optionsGeneration({
         me: this.parent,
@@ -164,6 +135,7 @@ class GoPickUp {
         comm: this.parent.comm
       });
     }
+    
     return true;
   }
 }

@@ -1,12 +1,12 @@
 /**
- * Comm - Communication module for multi-agent coordination
+ * comm.js - Communication Module for Multi-Agent Coordination
  * 
  * Handles:
  * - Handshake protocol to establish friendId
  * - Sending/receiving belief updates (parcels, agents)
  * - Sending/receiving intention claims
- * - Collision protocol messages
  */
+
 import { Msg } from './Msg.js';
 import { commLogger } from '../utils/logger.js';
 
@@ -22,25 +22,14 @@ class Comm {
     
     // Message handlers registered by external modules
     this._handlers = new Map();
-
-    // Rate limiting: track last send time per message type
-    this._lastSendTime = {
-      parcels: 0,
-      agents: 0
-    };
-    this._minSendInterval = 1000 / (config.COMM_RATE_LIMIT || 5); // ms between sends
-
-    // Diff-only: snapshots of last sent data for delta computation
-    this._lastSentParcels = new Map(); // id -> {x, y, reward, carriedBy}
-    this._lastSentAgents = new Map();  // id -> {x, y}
-    this._lastFullSendTime = { parcels: 0, agents: 0 };
-    this._fullSendInterval = config.COMM_FULL_SYNC_INTERVAL || 30000; // Full sync every 30s
+    
+    // Simple rate limiting
+    this._lastSendTime = { parcels: 0, agents: 0 };
+    this._minSendInterval = 200; // 5 messages/sec max
   }
 
   /**
-   * Check if we can send a message of given type (rate limiting)
-   * @param {string} type - 'parcels' or 'agents'
-   * @returns {boolean} true if allowed to send
+   * Check if we can send a message (rate limiting)
    */
   _canSend(type) {
     const now = Date.now();
@@ -52,8 +41,7 @@ class Comm {
   }
 
   /**
-   * Initialize communication - call after connection
-   * @param {boolean} isSecondAgent - true if this is agent 2
+   * Initialize communication
    */
   async init(isSecondAgent) {
     this.isSecondAgent = isSecondAgent;
@@ -72,8 +60,6 @@ class Comm {
 
   /**
    * Register a handler for a specific message type
-   * @param {string} header - message header to handle
-   * @param {Function} handler - function(senderId, content, reply)
    */
   on(header, handler) {
     if (!this._handlers.has(header)) {
@@ -83,32 +69,19 @@ class Comm {
   }
 
   /**
-   * Internal message handler - routes to registered handlers
+   * Internal message handler
    */
   async _handleMessage(senderId, senderName, msg, replyCallback) {
-    // Validate message structure
     if (!msg || !msg.header) {
       commLogger.warn('Received invalid message:', msg);
       return;
     }
 
     let { header, content } = msg;
-    // Defensive sanitization: strip any entries referencing our own id (silently)
-    try {
-      if (header === 'INFO_AGENTS' && Array.isArray(content) && this.me) {
-        content = content.filter(a => a && a.id !== this.me.id);
-        msg = new Msg(header, content);
-      } else if (header === 'INFO_AGENTS_DELTA' && content && this.me) {
-        const delta = {
-          added: (content.added || []).filter(a => a && a.id !== this.me.id),
-          updated: (content.updated || []).filter(a => a && a.id !== this.me.id),
-          removed: (content.removed || []).filter(id => id !== this.me.id)
-        };
-        content = delta;
-        msg = new Msg(header, content);
-      }
-    } catch (e) {
-      // ignore errors
+    
+    // Filter out our own id from agent lists
+    if (header === 'INFO_AGENTS' && Array.isArray(content) && this.me) {
+      content = content.filter(a => a && a.id !== this.me.id);
     }
     
     // Handle handshake internally
@@ -123,7 +96,7 @@ class Comm {
       try {
         await handler(senderId, content, replyCallback);
       } catch (err) {
-        console.error(`[COMM] Handler error for ${header}:`, err);
+        console.error('[COMM] Handler error:', err);
       }
     }
   }
@@ -139,191 +112,64 @@ class Comm {
   async _handleHandshake(senderId, phase, replyCallback) {
     if (phase === 'request' && !this.isSecondAgent) {
       // Agent 1 receives request from Agent 2
-      commLogger.info(`Received handshake request from ${senderId}`);
+      commLogger.info('Received handshake request from ' + senderId);
       this.friendId = senderId;
       this.me.friendId = senderId;
       
-      // Send acknowledgment
       const ackMsg = Msg.handshake('ack');
       await this.adapter.say(senderId, ackMsg);
       
       this.handshakeCompleted = true;
-      commLogger.info(`Handshake completed with ${senderId}`);
+      commLogger.info('Handshake completed with ' + senderId);
     } 
     else if (phase === 'ack' && this.isSecondAgent) {
       // Agent 2 receives ack from Agent 1
       this.friendId = senderId;
       this.me.friendId = senderId;
       this.handshakeCompleted = true;
-      commLogger.info(`Handshake completed with ${senderId}`);
+      commLogger.info('Handshake completed with ' + senderId);
     }
   }
 
   /**
-   * Check if communication is ready (handshake done)
+   * Check if communication is ready
    */
   isReady() {
     return this.handshakeCompleted && this.friendId !== null;
   }
 
   // =========================================================================
-  // SENDING METHODS (with diff-only optimization)
+  // SENDING METHODS
   // =========================================================================
 
   /**
-   * Check if we should send full sync (periodic fallback)
-   */
-  _shouldFullSync(type) {
-    const now = Date.now();
-    return now - this._lastFullSendTime[type] >= this._fullSendInterval;
-  }
-
-  /**
-   * Compute delta for parcels: added, updated, removed
-   */
-  _computeParcelsDelta(parcels) {
-    const current = new Map();
-    for (const p of parcels) {
-      current.set(p.id, { x: Math.round(p.x), y: Math.round(p.y), reward: p.reward, carriedBy: p.carriedBy || null });
-    }
-
-    const added = [];
-    const updated = [];
-    const removed = [];
-
-    // Find added or updated
-    for (const [id, data] of current) {
-      const prev = this._lastSentParcels.get(id);
-      if (!prev) {
-        added.push({ id, ...data });
-      } else if (prev.x !== data.x || prev.y !== data.y || prev.reward !== data.reward || prev.carriedBy !== data.carriedBy) {
-        updated.push({ id, ...data });
-      }
-    }
-
-    // Find removed
-    for (const id of this._lastSentParcels.keys()) {
-      if (!current.has(id)) {
-        removed.push(id);
-      }
-    }
-
-    // Update snapshot
-    this._lastSentParcels = current;
-
-    return { added, updated, removed };
-  }
-
-  /**
-   * Compute delta for agents: added, updated, removed
-   */
-  _computeAgentsDelta(agents) {
-    const current = new Map();
-    for (const a of agents) {
-      current.set(a.id, { x: Math.round(a.x), y: Math.round(a.y) });
-    }
-
-    const added = [];
-    const updated = [];
-    const removed = [];
-
-    for (const [id, data] of current) {
-      const prev = this._lastSentAgents.get(id);
-      if (!prev) {
-        added.push({ id, ...data });
-      } else if (prev.x !== data.x || prev.y !== data.y) {
-        updated.push({ id, ...data });
-      }
-    }
-
-    for (const id of this._lastSentAgents.keys()) {
-      if (!current.has(id)) {
-        removed.push(id);
-      }
-    }
-
-    this._lastSentAgents = current;
-
-    return { added, updated, removed };
-  }
-
-  /**
-   * Send parcels info to friend agent (rate-limited, diff-only with periodic full sync)
-   * @param {Array} parcels - array of parcel objects
+   * Send parcels info to friend agent
    */
   async sendParcels(parcels) {
     if (!this.isReady()) return;
     if (!this._canSend('parcels')) return;
-
-    const forceFullSync = this._shouldFullSync('parcels');
-
-    if (forceFullSync) {
-      // Full sync: send entire array
-      this._lastFullSendTime.parcels = Date.now();
-      // Update snapshot
-      this._lastSentParcels = new Map();
-      for (const p of parcels) {
-        this._lastSentParcels.set(p.id, { x: Math.round(p.x), y: Math.round(p.y), reward: p.reward, carriedBy: p.carriedBy || null });
-      }
-      const msg = Msg.parcels(parcels);
-      await this.adapter.say(this.friendId, msg);
-    } else {
-      // Delta sync
-      const delta = this._computeParcelsDelta(parcels);
-      const hasChanges = delta.added.length > 0 || delta.updated.length > 0 || delta.removed.length > 0;
-      if (hasChanges) {
-        const msg = Msg.parcelsDelta(delta);
-        await this.adapter.say(this.friendId, msg);
-      }
-      // If no changes, skip sending entirely
-    }
-  }
-
-  /**
-   * Send agents info to friend agent (rate-limited, diff-only with periodic full sync)
-   * @param {Array} agents - array of agent objects (include self)
-   */
-  async sendAgents(agents) {
-    if (!this.isReady()) return;
-    if (!this._canSend('agents')) return;
-
-    const forceFullSync = this._shouldFullSync('agents');
-
-    if (forceFullSync) {
-      this._lastFullSendTime.agents = Date.now();
-      this._lastSentAgents = new Map();
-      for (const a of agents) {
-        this._lastSentAgents.set(a.id, { x: Math.round(a.x), y: Math.round(a.y) });
-      }
-      const msg = Msg.agents(agents);
-      await this.adapter.say(this.friendId, msg);
-    } else {
-      const delta = this._computeAgentsDelta(agents);
-      const hasChanges = delta.added.length > 0 || delta.updated.length > 0 || delta.removed.length > 0;
-      if (hasChanges) {
-        const msg = Msg.agentsDelta(delta);
-        await this.adapter.say(this.friendId, msg);
-      }
-    }
-  }
-
-  /**
-   * Send current intention to friend agent
-   * @param {Array} predicate - intention predicate [action, x, y, id, score]
-   */
-  async sendIntention(predicate) {
-    if (!this.isReady()) return;
-    const msg = Msg.intention(predicate);
+    
+    const msg = Msg.parcels(parcels);
     await this.adapter.say(this.friendId, msg);
   }
 
   /**
-   * Send collision protocol message
-   * @param {string} type - 'COLLISION', 'MOVE', 'TAKE', 'DROP', 'END'
+   * Send agents info to friend agent
    */
-  async sendCollision(type) {
+  async sendAgents(agents) {
     if (!this.isReady()) return;
-    const msg = Msg.collision(type);
+    if (!this._canSend('agents')) return;
+    
+    const msg = Msg.agents(agents);
+    await this.adapter.say(this.friendId, msg);
+  }
+
+  /**
+   * Send current intention to friend agent
+   */
+  async sendIntention(predicate) {
+    if (!this.isReady()) return;
+    const msg = Msg.intention(predicate);
     await this.adapter.say(this.friendId, msg);
   }
 }

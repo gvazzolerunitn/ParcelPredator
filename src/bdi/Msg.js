@@ -1,8 +1,9 @@
 /**
- * Msg - Simple message structure for agent communication
+ * Msg.js - Message Structure for Agent Communication
  * 
- * Used for all inter-agent messages (handshake, belief sharing, intentions, collision)
+ * Simple message format for inter-agent communication.
  */
+
 class Msg {
   constructor(header = undefined, content = undefined) {
     this.header = header;
@@ -10,70 +11,24 @@ class Msg {
     this.timestamp = Date.now();
   }
 
-  setHeader(header) {
-    this.header = header;
-    return this;
-  }
-
-  setContent(content) {
-    this.content = content;
-    return this;
-  }
-
-  /**
-   * Create a HANDSHAKE message
-   * @param {string} phase - 'request' or 'ack'
-   */
+  /** Create a HANDSHAKE message */
   static handshake(phase) {
     return new Msg('HANDSHAKE', phase);
   }
 
-  /**
-   * Create an INFO_PARCELS message
-   * @param {Array} parcels - array of parcel objects
-   */
+  /** Create an INFO_PARCELS message */
   static parcels(parcels) {
     return new Msg('INFO_PARCELS', parcels);
   }
 
-  /**
-   * Create an INFO_PARCELS_DELTA message (diff-only)
-   * @param {Object} delta - { added: [], updated: [], removed: [] }
-   */
-  static parcelsDelta(delta) {
-    return new Msg('INFO_PARCELS_DELTA', delta);
-  }
-
-  /**
-   * Create an INFO_AGENTS message
-   * @param {Array} agents - array of agent objects
-   */
+  /** Create an INFO_AGENTS message */
   static agents(agents) {
     return new Msg('INFO_AGENTS', agents);
   }
 
-  /**
-   * Create an INFO_AGENTS_DELTA message (diff-only)
-   * @param {Object} delta - { added: [], updated: [], removed: [] }
-   */
-  static agentsDelta(delta) {
-    return new Msg('INFO_AGENTS_DELTA', delta);
-  }
-
-  /**
-   * Create an INTENTION message
-   * @param {Array} predicate - intention predicate [action, x, y, id, score]
-   */
+  /** Create an INTENTION message */
   static intention(predicate) {
     return new Msg('INTENTION', predicate);
-  }
-
-  /**
-   * Create a COLLISION message
-   * @param {string} type - 'COLLISION', 'MOVE', 'TAKE', 'DROP', 'END'
-   */
-  static collision(type) {
-    return new Msg('COLLISION', type);
   }
 }
 

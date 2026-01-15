@@ -1,133 +1,118 @@
+/**
+ * goDeliver.js - Delivery Plan
+ * 
+ * Moves to delivery zone and drops all carried parcels.
+ * Includes retry logic with exponential backoff.
+ */
+
 import { adapter } from "../../client/adapter.js";
 import { MoveBfs } from "./moveBfs.js";
 import { PDDLMove } from "./pddlMove.js";
 import config from "../../config/default.js";
+import { agentLogger } from '../../utils/logger.js';
 
-// Retry/backoff settings from config
-const PLAN_MAX_ATTEMPTS = config.planMaxAttempts ?? 3;
-const BACKOFF_BASE_MS = config.planBackoffBaseMs ?? 200;
-const BACKOFF_JITTER_MS = config.planBackoffJitterMs ?? 100;
-const TARGET_COOLDOWN_MS = config.targetCooldownMs ?? 3000;
+const MAX_ATTEMPTS = 3;
+const BACKOFF_BASE_MS = 200;
+const COOLDOWN_MS = 3000;
 
-/**
- * Helper: sleep for ms milliseconds
- */
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Helper: compute backoff with jitter
- */
 function getBackoff(attempt) {
-  const base = BACKOFF_BASE_MS * Math.pow(2, attempt);
-  const jitter = Math.floor(Math.random() * BACKOFF_JITTER_MS);
-  return base + jitter;
+  return BACKOFF_BASE_MS * Math.pow(2, attempt) + Math.floor(Math.random() * 100);
 }
 
 class GoDeliver {
   static isApplicableTo(desire) { return desire === 'go_deliver'; }
-  constructor(parent) { this.parent = parent; this.stopped = false; }
+  
+  constructor(parent) {
+    this.parent = parent;
+    this.stopped = false;
+  }
+  
   stop() { this.stopped = true; }
+  
   async execute(_desire, x, y) {
     if (this.stopped) throw new Error("stopped");
     
     const tx = Math.round(x);
     const ty = Math.round(y);
-    const tileKey = `${tx},${ty}`;
+    const tileKey = tx + ',' + ty;
     
-    // Check if delivery zone is on cooldown
-    if (this.parent.belief && this.parent.belief.isOnCooldown('delivery', tileKey)) {
-      console.log(`GoDeliver: Delivery zone (${tx},${ty}) is on cooldown, skipping`);
+    // Skip if delivery zone is on cooldown
+    if (this.parent.belief?.isOnCooldown('delivery', tileKey)) {
+      agentLogger.hot('cooldown', 3000, 'GoDeliver: Zone on cooldown, skipping');
       throw new Error("target on cooldown");
     }
     
-    // Macro-retry loop for movement with replan
-    let moveResult = true;
+    // Move to delivery zone with retry
     if (Math.round(this.parent.x) !== tx || Math.round(this.parent.y) !== ty) {
-      for (let attempt = 0; attempt < PLAN_MAX_ATTEMPTS; attempt++) {
+      let moveResult = true;
+      
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         if (this.stopped) throw new Error("stopped");
         
-        const mover = (config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent));
+        const mover = config.usePddl ? new PDDLMove(this.parent) : new MoveBfs(this.parent);
         
-        // Wrap in try-catch to handle 'no plan found' and other errors
         try {
           moveResult = await mover.execute('go_to', tx, ty, this.parent.belief);
         } catch (err) {
-          // Treat 'no plan found' as retriable (like obstructed)
-          if (err.message === 'no plan found' || err.message === 'domain not found') {
-            moveResult = 'no-plan';
-          } else if (err.message === 'stopped') {
-            throw err; // Re-throw stop signals
-          } else {
-            console.log(`GoDeliver: Unexpected error: ${err.message}`);
-            moveResult = 'error';
-          }
+          if (err.message === 'stopped') throw err;
+          moveResult = 'error';
         }
         
-        if (moveResult === true) {
-          // Success - clear any cooldown on this target
+        if (moveResult === true) break;
+        
+        // Retry on failure
+        if (attempt < MAX_ATTEMPTS - 1) {
+          const backoff = getBackoff(attempt);
+          agentLogger.hot('retry', 3000, 'GoDeliver: Movement failed, retrying in ' + backoff + 'ms');
+          await sleep(backoff);
+        } else {
+          // All retries exhausted
           if (this.parent.belief) {
-            this.parent.belief.clearCooldown('delivery', tileKey);
+            this.parent.belief.setCooldown('delivery', tileKey, COOLDOWN_MS);
           }
-          break;
-        }
-        
-        // Handle retriable failures: obstructed, no-plan, error
-        if (moveResult === "obstructed" || moveResult === "no-plan" || moveResult === "error") {
-          const reason = moveResult === "obstructed" ? "path obstructed" : 
-                         moveResult === "no-plan" ? "no plan found" : "error";
-          if (attempt < PLAN_MAX_ATTEMPTS - 1) {
-            const backoff = getBackoff(attempt);
-            console.log(`GoDeliver: ${reason}, attempt ${attempt + 1}/${PLAN_MAX_ATTEMPTS} — retrying in ${backoff}ms`);
-            await sleep(backoff);
-          } else {
-            // All retries exhausted - set cooldown
-            console.log(`GoDeliver: All ${PLAN_MAX_ATTEMPTS} attempts failed for delivery zone (${tx},${ty}) (${reason})`);
-            if (this.parent.belief) {
-              this.parent.belief.setCooldown('delivery', tileKey, TARGET_COOLDOWN_MS);
-            }
-            throw new Error("delivery failed");
-          }
+          throw new Error("delivery failed");
         }
       }
     }
     
-    // Se non ci sono pacchi da consegnare, potrebbe essere stato già fatto
-    // un opportunistic putdown durante il movimento — considera successo
-    if (this.parent.carried <= 0) {
-      return true;
-    }
+    // If no parcels to deliver, consider success
+    if (this.parent.carried <= 0) return true;
 
-    // Cattura gli ID dei pacchi che stiamo per consegnare (evita race con onParcels)
-    const deliveredIdsArr = (this.parent.carried_parcels || []).map(p => p.id);
-    const deliveredCount = deliveredIdsArr.length;
+    // Capture parcel IDs before delivery
+    const deliveredIds = (this.parent.carried_parcels || []).map(p => p.id);
+    const deliveredCount = deliveredIds.length;
 
+    // Putdown action
     const res = await adapter.putdown();
     if (!res) throw new Error("putdown failed");
 
-    // Rimuovi dalla belief eventuali record residui dei pacchi consegnati
-    for (const id of deliveredIdsArr) {
+    // Remove delivered parcels from belief
+    for (const id of deliveredIds) {
       try { this.parent.belief.removeParcel(id); } catch (e) { /* ignore */ }
     }
 
-    // Reset stato dopo consegna
-    const deliveredIds = deliveredIdsArr.join(',');
+    // Reset carried state
     this.parent.carried = 0;
     this.parent.carriedReward = 0;
     this.parent.carried_parcels = [];
 
-    console.log('Delivered', deliveredCount, 'parcels | IDs:', deliveredIds);
+    agentLogger.hot('deliver', 2000, 'Delivered ' + deliveredCount + ' parcels');
     
-    // Chiama immediatamente optionsGeneration per decidere il prossimo passo
+    // Trigger new intention generation
     if (this.parent.optionsGeneration) {
       this.parent.optionsGeneration({
         me: this.parent,
         belief: this.parent.belief,
         grid: this.parent.grid,
-        push: (p) => this.parent.push(p)
+        push: (p) => this.parent.push(p),
+        comm: this.parent.comm
       });
     }
+    
     return true;
   }
 }
