@@ -3,10 +3,16 @@
  * 
  * Generates candidate intentions using simple nearest-parcel scoring.
  * Supports claim-based coordination for multi-agent scenarios.
+ * Implements collaborative parcel delegation using FIPA REQUEST protocol.
  */
 
 import { grid as globalGrid } from "../utils/grid.js";
 import { defaultLogger } from '../utils/logger.js';
+import { Msg } from './Msg.js';
+
+// Cooldown tracking for REQUEST messages to avoid spam
+const requestCooldowns = new Map(); // parcelId -> timestamp
+const REQUEST_COOLDOWN_MS = 3000; // 3 seconds
 
 // ============================================================================
 // HELPER FUNCTIONS
@@ -209,19 +215,64 @@ function optionsGeneration({ me, belief, grid, push, comm }) {
   let bestParcel = null;
   
   if (me.carried < capacity && candidates.length > 0) {
-    const parcel = candidates[0]; // Nearest non-contested parcel
-    const px = Math.round(parcel.x);
-    const py = Math.round(parcel.y);
-    const distToParcel = g.manhattanDistance(me.x, me.y, px, py);
+    // Clean expired cooldowns
+    const now = Date.now();
+    for (const [pid, expiry] of requestCooldowns.entries()) {
+      if (now >= expiry) requestCooldowns.delete(pid);
+    }
     
-    // Find delivery distance from parcel position
-    const { dist: deliveryFromParcel } = findNearestDelivery(px, py, deliveryZones, g, belief);
+    // Get friend agent position if available
+    let friendAgent = null;
+    if (me.friendId && belief.agents) {
+      friendAgent = belief.agents.get(me.friendId);
+    }
     
-    // Score: parcel reward - movement cost (to parcel + to delivery)
-    const totalDist = distToParcel + deliveryFromParcel;
-    const moveCost = totalDist * loss * (me.carried + 1);
-    pickupScore = ((parcel.reward || 1) + me.carriedReward - moveCost) * parcel.penalty;
-    bestParcel = parcel;
+    // Evaluate parcels with collaborative delegation
+    for (const parcel of candidates) {
+      const px = Math.round(parcel.x);
+      const py = Math.round(parcel.y);
+      const myDist = g.manhattanDistance(me.x, me.y, px, py);
+      
+      // COLLABORATIVE LOGIC: delegate if friend is significantly closer
+      if (friendAgent && comm?.isReady()) {
+        const friendDist = g.manhattanDistance(friendAgent.x, friendAgent.y, px, py);
+        const threshold = myDist * 0.6; // Friend must be < 60% of my distance
+        
+        // Check if parcel is NOT in my critical zone (very close to me)
+        const inMyCriticalZone = myDist <= 3;
+        
+        if (friendDist < threshold && !inMyCriticalZone && !requestCooldowns.has(parcel.id)) {
+          // Delegate to friend via REQUEST
+          defaultLogger.hot('delegate', 3000, 'Delegating ' + parcel.id + ' to friend (myDist=' + myDist + ', friendDist=' + friendDist + ')');
+          
+          const requestMsg = Msg.request(parcel);
+          comm.adapter.say(comm.friendId, requestMsg).catch(err => 
+            console.error('[COMM] Failed to send REQUEST:', err)
+          );
+          
+          // Set cooldown to avoid spam
+          requestCooldowns.set(parcel.id, now + REQUEST_COOLDOWN_MS);
+          continue; // Skip this parcel, try next one
+        }
+      }
+      
+      // Parcel not delegated, evaluate it for myself
+      const distToParcel = myDist;
+      const { dist: deliveryFromParcel } = findNearestDelivery(px, py, deliveryZones, g, belief);
+      
+      // Score: parcel reward - movement cost (to parcel + to delivery)
+      const totalDist = distToParcel + deliveryFromParcel;
+      const moveCost = totalDist * loss * (me.carried + 1);
+      const score = ((parcel.reward || 1) + me.carriedReward - moveCost) * parcel.penalty;
+      
+      if (score > pickupScore) {
+        pickupScore = score;
+        bestParcel = parcel;
+      }
+      
+      // Stop at first good candidate (already sorted by distance/contention)
+      if (pickupScore > 0) break;
+    }
   }
 
   // -------------------------------------------------------------------------

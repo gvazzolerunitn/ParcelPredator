@@ -30,6 +30,26 @@ class Msg {
   static intention(predicate) {
     return new Msg('INTENTION', predicate);
   }
+
+  /** Create a REQUEST message (FIPA-compliant) */
+  static request(parcel) {
+    return new Msg('REQUEST', {
+      id: parcel.id,
+      x: parcel.x,
+      y: parcel.y,
+      reward: parcel.reward
+    });
+  }
+
+  /** Create an AGREE message (FIPA-compliant) */
+  static agree(requestId = null) {
+    return new Msg('AGREE', requestId);
+  }
+
+  /** Create a REFUSE message (FIPA-compliant) */
+  static refuse(requestId = null, reason = 'cannot_perform') {
+    return new Msg('REFUSE', { requestId, reason });
+  }
 }
 
 export { Msg };

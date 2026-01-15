@@ -49,6 +49,9 @@ class Comm {
     // Register message handler
     this.adapter.onMsg((id, name, msg, reply) => this._handleMessage(id, name, msg, reply));
     
+    // Register internal REQUEST handler
+    this.on('REQUEST', (senderId, content) => this._handleRequest(senderId, content));
+    
     // If second agent, initiate handshake
     if (isSecondAgent) {
       commLogger.info('Agent 2 initiating handshake...');
@@ -128,6 +131,84 @@ class Comm {
       this.me.friendId = senderId;
       this.handshakeCompleted = true;
       commLogger.info('Handshake completed with ' + senderId);
+    }
+  }
+
+  /**
+   * Handle incoming REQUEST messages (FIPA protocol)
+   */
+  async _handleRequest(senderId, parcelData) {
+    if (!this.isReady() || senderId !== this.friendId) {
+      commLogger.warn('Ignoring REQUEST from non-friend or before handshake');
+      return;
+    }
+
+    // Defensive validation: check parcel data structure
+    if (!parcelData || typeof parcelData !== 'object') {
+      commLogger.warn('Invalid REQUEST: missing or invalid parcel data');
+      await this.adapter.say(senderId, Msg.refuse(parcelData?.id, 'invalid_data'));
+      return;
+    }
+
+    const { id, x, y, reward } = parcelData;
+    
+    // Validate required fields
+    if (id === undefined || x === undefined || y === undefined) {
+      commLogger.warn('Invalid REQUEST: missing required fields (id, x, y)');
+      await this.adapter.say(senderId, Msg.refuse(id, 'missing_fields'));
+      return;
+    }
+
+    // Check if coordinates are valid numbers
+    const px = Math.round(x);
+    const py = Math.round(y);
+    if (isNaN(px) || isNaN(py)) {
+      commLogger.warn('Invalid REQUEST: invalid coordinates');
+      await this.adapter.say(senderId, Msg.refuse(id, 'invalid_coords'));
+      return;
+    }
+
+    // Check capacity
+    const capacity = this.me.capacity || 4;
+    const carried = this.me.carried || 0;
+    
+    if (carried >= capacity) {
+      commLogger.info('REFUSE REQUEST ' + id + ': capacity full (' + carried + '/' + capacity + ')');
+      await this.adapter.say(senderId, Msg.refuse(id, 'capacity_full'));
+      return;
+    }
+
+    // Check if not too many intentions queued (max 2)
+    const intentionCount = this.me.intentions?.length || 0;
+    if (intentionCount >= 2) {
+      commLogger.info('REFUSE REQUEST ' + id + ': too busy (' + intentionCount + ' intentions)');
+      await this.adapter.say(senderId, Msg.refuse(id, 'too_busy'));
+      return;
+    }
+
+    // ACCEPT: Send AGREE and add intention
+    commLogger.info('AGREE REQUEST ' + id + ' at (' + px + ',' + py + ') reward=' + (reward || '?'));
+    
+    try {
+      // Send AGREE response
+      await this.adapter.say(senderId, Msg.agree(id));
+      
+      // Add go_pick_up intention to my queue
+      // Format: ['go_pick_up', x, y, parcelId, score]
+      const score = reward || 1; // Use reward as approximate score
+      const intention = ['go_pick_up', px, py, id, score];
+      
+      // Push intention to agent's queue
+      if (this.me.push && typeof this.me.push === 'function') {
+        this.me.push(intention);
+        commLogger.info('Added intention: go_pick_up ' + id);
+      } else {
+        commLogger.warn('Cannot add intention: me.push not available');
+      }
+    } catch (err) {
+      commLogger.error('Error handling REQUEST:', err);
+      // Try to send REFUSE as fallback
+      await this.adapter.say(senderId, Msg.refuse(id, 'internal_error')).catch(() => {});
     }
   }
 
