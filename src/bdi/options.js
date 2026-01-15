@@ -44,10 +44,17 @@ function getContentionPenalty(parcel, myX, myY, otherAgents, g) {
 
 /**
  * Returns free parcels sorted by distance, filtering out cooldown targets.
+ * Implements ZONING strategy: agents with even ID prefer left half, odd ID prefer right half.
  */
 function getFreeParcelsWithScoring(belief, x, y, g, myId) {
   const parcels = belief.getFreeParcels();
   const otherAgents = belief.getOtherAgents(myId);
+  const mapWidth = g.width;
+  const halfWidth = mapWidth / 2;
+  
+  // Determine my zone based on agent ID
+  const isEvenId = myId % 2 === 0;
+  const myZone = isEvenId ? 'left' : 'right';
   
   const scored = parcels
     // Filter parcels on cooldown (recently failed targets)
@@ -55,16 +62,21 @@ function getFreeParcelsWithScoring(belief, x, y, g, myId) {
     .map(p => {
       const dist = g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y));
       const contention = getContentionPenalty(p, x, y, otherAgents, g);
-      return { ...p, dist, contested: contention.contested, penalty: contention.penalty };
+      const isInMyZone = (isEvenId && p.x < halfWidth) || (!isEvenId && p.x >= halfWidth);
+      return { ...p, dist, contested: contention.contested, penalty: contention.penalty, isInMyZone };
     });
   
+  // ZONING LOGIC: Filter by zone with fallback
+  const myZoneParcels = scored.filter(p => p.isInMyZone);
+  const parcelsToUse = myZoneParcels.length > 0 ? myZoneParcels : scored;
+  
   // Sort: non-contested first, then by distance
-  scored.sort((a, b) => {
+  parcelsToUse.sort((a, b) => {
     if (a.contested !== b.contested) return a.contested ? 1 : -1;
     return a.dist - b.dist;
   });
   
-  return scored;
+  return parcelsToUse;
 }
 
 /**

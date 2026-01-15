@@ -21,6 +21,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DOMAIN_PATH = path.join(__dirname, "../../PDDL/domain.pddl");
 
+// Load domain.pddl once at module initialization
+let DOMAIN_CONTENT = null;
+try {
+  DOMAIN_CONTENT = fs.readFileSync(DOMAIN_PATH, "utf8");
+  agentLogger.info('PDDLMove: Domain loaded successfully from ' + DOMAIN_PATH);
+} catch (err) {
+  agentLogger.error('PDDLMove: CRITICAL - Cannot load domain.pddl at startup:', err.message);
+  agentLogger.error('PDDLMove: Path attempted: ' + DOMAIN_PATH);
+  // Set to empty string to avoid null checks later
+  DOMAIN_CONTENT = "";
+}
+
 class PDDLMove {
   static isApplicableTo(desire) {
     return desire === 'go_to' && config.usePddl === true;
@@ -66,14 +78,14 @@ class PDDLMove {
     );
     const problem = planner.getProblem();
 
-    // Read domain file
-    let domain;
-    try {
-      domain = fs.readFileSync(DOMAIN_PATH, "utf8");
-    } catch (err) {
-      agentLogger.error('PDDLMove: Cannot read domain.pddl:', err.message);
-      throw new Error("domain not found");
+    // Check if domain was loaded successfully at module initialization
+    if (!DOMAIN_CONTENT || DOMAIN_CONTENT.length === 0) {
+      agentLogger.error('PDDLMove: Domain content not available (failed at module load)');
+      throw new Error("domain not loaded");
     }
+
+    // Use pre-loaded domain content
+    const domain = DOMAIN_CONTENT;
 
     // Call solver with timing
     let plan;
