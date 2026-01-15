@@ -7,7 +7,39 @@
  * The local solver uses A* search on the grid to find a path, then converts
  * it to PDDL-style action format. This is much faster than calling an external
  * PDDL solver for simple navigation problems.
+ * 
+ * Includes caching for repeated queries to minimize latency.
  */
+
+// ============ CACHING (singleton) ============
+const solutionCache = new Map();
+let cacheCallCount = 0;
+const CACHE_CLEAR_INTERVAL = 100; // Clear cache every N calls to prevent memory leaks
+// Last-call cache hit flag (readable via getter)
+let lastCacheHit = false;
+
+/**
+ * Create a cache key from problem characteristics
+ * @param {object} parsed - Parsed problem data
+ * @returns {string} Cache key
+ */
+function createCacheKey(parsed) {
+  if (!parsed.start || !parsed.goal) return null;
+  const startKey = `${parsed.start.x},${parsed.start.y}`;
+  const goalKey = `${parsed.goal.x},${parsed.goal.y}`;
+  const blockedCount = parsed.blocked.size;
+  // Include blocked tiles hash for more precise caching
+  const blockedHash = Array.from(parsed.blocked).sort().join('|');
+  return `${startKey}_${goalKey}_${blockedCount}_${blockedHash}`;
+}
+
+/**
+ * Return whether the last fastLocalSolver call returned from cache
+ * @returns {boolean}
+ */
+function getLastCacheHit() {
+  return !!lastCacheHit;
+}
 
 /**
  * Parse PDDL problem to extract start, goal, and grid info
@@ -163,13 +195,30 @@ function aStarSearch(parsed) {
 
 /**
  * Solve PDDL problem locally using A* search
+ * Uses caching to speed up repeated queries (like ASAPlanners)
  * @param {string} domain - PDDL domain string (not used for local solver, kept for API compat)
  * @param {string} problem - PDDL problem string
  * @returns {Promise<array>} Array of actions [{action: 'up'}, ...] or empty array if no solution
  */
 async function fastLocalSolver(domain, problem) {
+  // Periodic cache clear to prevent memory leaks
+  cacheCallCount++;
+  if (cacheCallCount % CACHE_CLEAR_INTERVAL === 0) {
+    solutionCache.clear();
+  }
+
   try {
     const parsed = parseProblem(problem);
+    
+    // Check cache first
+    const cacheKey = createCacheKey(parsed);
+    lastCacheHit = false;
+    if (cacheKey && solutionCache.has(cacheKey)) {
+      lastCacheHit = true;
+      // Return a copy to avoid mutation issues
+      return solutionCache.get(cacheKey).map(a => ({ ...a }));
+    }
+
     const plan = aStarSearch(parsed);
     
     if (plan === null) {
@@ -177,6 +226,12 @@ async function fastLocalSolver(domain, problem) {
       return [];
     }
     
+    // Cache the result
+    if (cacheKey) {
+      solutionCache.set(cacheKey, plan);
+    }
+    lastCacheHit = false;
+
     return plan;
   } catch (err) {
     console.error('fastLocalSolver error:', err.message);
@@ -222,4 +277,4 @@ async function onlineSolverFallback(domain, problem) {
   }
 }
 
-export { fastLocalSolver, onlineSolverFallback, parseProblem, aStarSearch };
+export { fastLocalSolver, onlineSolverFallback, parseProblem, aStarSearch, solutionCache, getLastCacheHit };

@@ -12,7 +12,7 @@
 import { adapter } from "../../client/adapter.js";
 import { grid } from "../../utils/grid.js";
 import { PddlPlanner } from "../../PDDL/pddlPlanner.js";
-import { fastLocalSolver, onlineSolverFallback } from "../../PDDL/fastLocalSolver.js";
+import { fastLocalSolver, onlineSolverFallback, getLastCacheHit } from "../../PDDL/fastLocalSolver.js";
 import config from "../../config/default.js";
 import { agentLogger } from '../../utils/logger.js';
 import fs from "fs";
@@ -117,11 +117,12 @@ class PDDLMove {
       throw new Error("domain not found");
     }
 
-    // Call solver
-    const startTime = Date.now();
+    // Call solver (measure latency with high resolution and log to CSV)
+    const start = process.hrtime.bigint();
     let plan;
+    const solverType = (config.solver === "online") ? 'online' : 'local';
 
-    if (config.solver === "online") {
+    if (solverType === "online") {
       if (config.DEBUG) agentLogger.debug('PDDLMove: Using online solver...');
       plan = await onlineSolverFallback(domain, problem);
     } else {
@@ -129,8 +130,32 @@ class PDDLMove {
       plan = await fastLocalSolver(domain, problem);
     }
 
-    const elapsed = Date.now() - startTime;
-    if (config.DEBUG) agentLogger.debug(`PDDLMove: Solver completed in ${elapsed}ms, plan length: ${plan?.length || 0}`);
+    const end = process.hrtime.bigint();
+    const durationMs = Number(end - start) / 1e6;
+    const durationStr = durationMs.toFixed(3);
+    if (config.DEBUG) agentLogger.debug(`PDDLMove: Solver completed in ${durationStr}ms, plan length: ${plan?.length || 0}`);
+
+    // Append latency to CSV (create file with header if needed)
+    try {
+      const csvPath = path.join(__dirname, '../../PDDL/solver_latency.csv');
+      const now = new Date().toISOString();
+      const startTile = `tile_${sx}_${sy}`;
+      const goalTile = `tile_${tx}_${ty}`;
+      const planLen = plan ? (Array.isArray(plan) ? plan.length : 0) : 0;
+      // Determine cache hit (only meaningful for local solver)
+      const cacheHit = (solverType === 'local') ? (getLastCacheHit() ? 1 : 0) : 0;
+      const line = `${now},${solverType},${durationStr},${startTile},${goalTile},${planLen},${cacheHit}\n`;
+      let needHeader = true;
+      if (fs.existsSync(csvPath)) {
+        try { needHeader = fs.statSync(csvPath).size === 0; } catch (e) { needHeader = true; }
+      }
+      if (needHeader) {
+        fs.writeFileSync(csvPath, 'timestamp,solver_type,duration_ms,start,goal,plan_length,cache_hit\n', 'utf8');
+      }
+      fs.appendFileSync(csvPath, line, 'utf8');
+    } catch (e) {
+      agentLogger.error('PDDLMove: Failed to log solver latency:', e.message);
+    }
 
     // Empty plan but not at goal = no solution
     if (!plan || plan.length === 0) {
