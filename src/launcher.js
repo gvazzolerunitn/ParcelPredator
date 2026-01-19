@@ -246,6 +246,12 @@ if (config.DUAL) {
   comm.on('HANDOFF', async (senderId, data, reply) => {
     const { phase, escapeCell } = data;
     
+    if (phase === 'ACK_START') {
+      // Handle ACK for handoff initiator
+      comm._handleHandoffAck();
+      return;
+    }
+    
     // Enter handoff state to pause normal behavior
     me.setHandoffState(true);
     
@@ -263,28 +269,49 @@ if (config.DUAL) {
       // Partner initiated handoff, I need to respond
       defaultLogger.info('[HANDOFF] Received START from partner');
       
+      // IMPORTANT: Send ACK immediately so partner knows we received START
+      await comm.sendHandoff('ACK_START', null);
+      defaultLogger.info('[HANDOFF] Sent ACK_START to partner');
+      
+      // Small delay to ensure ACK is sent before heavy operations
+      await new Promise(res => setTimeout(res, 100));
+      
       // Find my escape route
       const myEscapes = getEscapeRoutes(myX, myY, belief.getAgentsArray(), gridRef);
       const myEscape = myEscapes[0];
       
       if (myEscape) {
-        if (me.carried > 0) {
-          // I have parcels: drop them and retreat
-          await adapter.putdown();
-          me.carried = 0;
-          me.carriedReward = 0;
-          me.carried_parcels = [];
-          await adapter.move(gridRef.getDirection(myX, myY, myEscape.x, myEscape.y));
-          comm.sendHandoff('DROPPED', myEscape);
-        } else {
-          // I don't have parcels: retreat and signal partner to drop
-          await adapter.move(gridRef.getDirection(myX, myY, myEscape.x, myEscape.y));
-          comm.sendHandoff('RETREATED', myEscape);
+        try {
+          if (me.carried > 0) {
+            // I have parcels: drop them and retreat
+            defaultLogger.info('[HANDOFF] Dropping ' + me.carried + ' parcels and retreating');
+            const putdownResult = await adapter.putdown();
+            if (putdownResult && putdownResult.length > 0) {
+              defaultLogger.info('[HANDOFF] Successfully dropped ' + putdownResult.length + ' parcels');
+            }
+            me.carried = 0;
+            me.carriedReward = 0;
+            me.carried_parcels = [];
+            await adapter.move(gridRef.getDirection(myX, myY, myEscape.x, myEscape.y));
+            await comm.sendHandoff('DROPPED', myEscape);
+            defaultLogger.info('[HANDOFF] DROPPED message sent');
+          } else {
+            // I don't have parcels: retreat and signal partner to drop
+            defaultLogger.info('[HANDOFF] Retreating (no parcels)');
+            await adapter.move(gridRef.getDirection(myX, myY, myEscape.x, myEscape.y));
+            await comm.sendHandoff('RETREATED', myEscape);
+            defaultLogger.info('[HANDOFF] RETREATED message sent');
+          }
+        } catch (err) {
+          defaultLogger.error('[HANDOFF] Error during handoff execution: ' + err.message);
+          me.setHandoffState(false);
+          await comm.sendHandoff('ABORT', { reason: 'execution_error' });
         }
       } else {
         // Can't move, abort
+        defaultLogger.warn('[HANDOFF] No escape routes available - aborting');
         me.setHandoffState(false);
-        comm.sendHandoff('ABORT', null);
+        await comm.sendHandoff('ABORT', { reason: 'no_escape' });
       }
     }
     else if (phase === 'DROPPED') {

@@ -30,6 +30,11 @@ class Comm {
     // Pending requests tracking (parcelId -> {resolve, reject, timer})
     this._pendingRequests = new Map();
     this._requestTimeout = 5000; // 5s default timeout
+    
+    // Handoff tracking (for ACK/retry)
+    this._handoffPending = null; // { resolve, reject, timer, attempt }
+    this._handoffTimeout = 3000; // 3s per attempt
+    this._handoffMaxAttempts = 2; // Max retry attempts
   }
 
   /**
@@ -337,10 +342,10 @@ class Comm {
   }
 
   /**
-   * Initiate handoff protocol (called by second agent when deadlock detected)
+   * Initiate handoff protocol with ACK and retry (called when deadlock detected)
    */
   async initiateHandoff(escapeCell) {
-    if (!this.isReady()) return;
+    if (!this.isReady()) return false;
     
     // Set local handoff state
     this.me.setHandoffState(true);
@@ -351,10 +356,68 @@ class Comm {
       this.me.intentions = [];
     }
     
-    commLogger.info('Initiating handoff protocol -> sending START to ' + this.friendId + ' escape=' + JSON.stringify(escapeCell));
-    const msg = Msg.handoff('START', escapeCell);
-    await this.adapter.say(this.friendId, msg);
-    commLogger.info('START message sent');
+    commLogger.info('[HANDOFF] Initiating protocol with retry -> sending START to ' + this.friendId);
+    
+    // Try up to maxAttempts to get ACK
+    for (let attempt = 1; attempt <= this._handoffMaxAttempts; attempt++) {
+      try {
+        const ackReceived = await this._sendHandoffStartWithAck(escapeCell, attempt);
+        if (ackReceived) {
+          commLogger.info('[HANDOFF] START acknowledged by partner on attempt ' + attempt);
+          return true;
+        }
+      } catch (err) {
+        commLogger.warn('[HANDOFF] START attempt ' + attempt + ' failed: ' + err.message);
+      }
+      
+      // Wait a bit before retry
+      if (attempt < this._handoffMaxAttempts) {
+        await new Promise(res => setTimeout(res, 500));
+      }
+    }
+    
+    commLogger.error('[HANDOFF] Failed to initiate after ' + this._handoffMaxAttempts + ' attempts - ABORTING');
+    this.me.setHandoffState(false);
+    return false;
+  }
+  
+  /**
+   * Send START and wait for ACK
+   */
+  async _sendHandoffStartWithAck(escapeCell, attempt) {
+    return new Promise((resolve, reject) => {
+      // Setup timeout
+      const timer = setTimeout(() => {
+        this._handoffPending = null;
+        commLogger.warn('[HANDOFF] Timeout waiting for ACK_START (attempt ' + attempt + ')');
+        resolve(false); // Timeout = no ACK
+      }, this._handoffTimeout);
+      
+      // Store pending
+      this._handoffPending = { resolve, reject, timer, attempt };
+      
+      // Send START
+      const msg = Msg.handoff('START', escapeCell);
+      this.adapter.say(this.friendId, msg).catch(err => {
+        clearTimeout(timer);
+        this._handoffPending = null;
+        reject(err);
+      });
+      
+      commLogger.info('[HANDOFF] START sent (attempt ' + attempt + '), waiting for ACK...');
+    });
+  }
+  
+  /**
+   * Handle ACK_START (called by message handler)
+   */
+  _handleHandoffAck() {
+    if (this._handoffPending) {
+      clearTimeout(this._handoffPending.timer);
+      const pending = this._handoffPending;
+      this._handoffPending = null;
+      pending.resolve(true); // ACK received
+    }
   }
 
   /**
