@@ -155,6 +155,12 @@ class Belief {
     return Array.from(this.agents.values()).filter(a => a.id !== myId);
   }
 
+  /** Get all agents as array */
+  getAgentsArray() {
+    this.checkExpiredAgents();
+    return Array.from(this.agents.values());
+  }
+
   // =========================================================================
   // COOLDOWNS
   // =========================================================================

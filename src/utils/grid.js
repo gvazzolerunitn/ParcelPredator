@@ -65,6 +65,17 @@ class Grid {
     }
     return path.reverse();
   }
+
+  /** Get direction from (x1,y1) to adjacent cell (x2,y2) */
+  getDirection(x1, y1, x2, y2) {
+    const dx = Math.round(x2) - Math.round(x1);
+    const dy = Math.round(y2) - Math.round(y1);
+    if (dx === 1) return 'right';
+    if (dx === -1) return 'left';
+    if (dy === 1) return 'up';
+    if (dy === -1) return 'down';
+    return null;
+  }
 }
 
 // Singleton di comodo (sovrascritto dal launcher quando arriva la mappa)

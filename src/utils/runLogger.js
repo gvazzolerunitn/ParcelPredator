@@ -120,7 +120,9 @@ class RunLogger {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    const filename = path.join(dir, `run-${this.runId}.txt`);
+    // Include agent name in filename to separate dual agent logs
+    const agentSuffix = this.agentName ? `-${this.agentName}` : '';
+    const filename = path.join(dir, `run-${this.runId}${agentSuffix}.txt`);
     
     // Get config info
     const mode = this.config.DUAL ? 'DUAL' : 'SINGLE';

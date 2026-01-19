@@ -198,9 +198,9 @@ class Comm {
       const score = reward || 1; // Use reward as approximate score
       const intention = ['go_pick_up', px, py, id, score];
       
-      // Push intention to agent's queue
+      // Push intention to agent's queue (replace=false to not interrupt current intention)
       if (this.me.push && typeof this.me.push === 'function') {
-        this.me.push(intention);
+        this.me.push(intention, false); // Queue without interrupting
         commLogger.info('Added intention: go_pick_up ' + id);
       } else {
         commLogger.warn('Cannot add intention: me.push not available');
@@ -252,6 +252,38 @@ class Comm {
     if (!this.isReady()) return;
     const msg = Msg.intention(predicate);
     await this.adapter.say(this.friendId, msg);
+  }
+
+  /**
+   * Initiate handoff protocol (called by second agent when deadlock detected)
+   */
+  async initiateHandoff(escapeCell) {
+    if (!this.isReady()) return;
+    
+    // Set local handoff state
+    this.me.setHandoffState(true);
+    
+    // Stop current intention
+    if (this.me.intentions?.length > 0) {
+      this.me.intentions[0]?.stop?.();
+      this.me.intentions = [];
+    }
+    
+    commLogger.info('Initiating handoff protocol -> sending START to ' + this.friendId + ' escape=' + JSON.stringify(escapeCell));
+    const msg = Msg.handoff('START', escapeCell);
+    await this.adapter.say(this.friendId, msg);
+    commLogger.info('START message sent');
+  }
+
+  /**
+   * Send handoff protocol message
+   */
+  async sendHandoff(phase, escapeCell) {
+    if (!this.isReady()) return;
+    commLogger.info('Sending HANDOFF ' + phase + ' to ' + this.friendId + ' data=' + JSON.stringify(escapeCell));
+    const msg = Msg.handoff(phase, escapeCell);
+    await this.adapter.say(this.friendId, msg);
+    commLogger.info('HANDOFF ' + phase + ' sent');
   }
 }
 

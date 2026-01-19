@@ -52,14 +52,25 @@ function clearTargetCooldown(x, y) {
 
 /**
  * Costruisce un set di celle bloccate dalle posizioni degli agenti
+ * Includes friend's destination to avoid path collision
  */
-function getBlockedCells(belief, myId) {
+function getBlockedCells(belief, myId, friendId = null) {
   const blocked = new Set();
   if (!belief || !belief.getOtherAgents) return blocked;
+  
   const others = belief.getOtherAgents(myId);
   for (const agent of others) {
     blocked.add(`${Math.round(agent.x)},${Math.round(agent.y)}`);
   }
+  
+  // Also block friend's destination to avoid collision during movement
+  if (friendId && belief.getFriendIntention) {
+    const friendClaim = belief.getFriendIntention(friendId);
+    if (friendClaim && friendClaim.x !== undefined && friendClaim.y !== undefined) {
+      blocked.add(`${Math.round(friendClaim.x)},${Math.round(friendClaim.y)}`);
+    }
+  }
+  
   return blocked;
 }
 
@@ -92,8 +103,8 @@ class MoveBfs {
         return true;
       }
       
-      // Ottieni celle bloccate da altri agenti
-      const blockedCells = belief ? getBlockedCells(belief, this.parent.id) : null;
+      // Ottieni celle bloccate da altri agenti (include friend's destination)
+      const blockedCells = belief ? getBlockedCells(belief, this.parent.id, this.parent.friendId) : null;
       
       // Prova prima con agent-aware path, poi fallback a path normale
       let path = blockedCells ? grid.bfsPath(sx, sy, tx, ty, blockedCells) : null;

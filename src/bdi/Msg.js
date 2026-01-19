@@ -50,6 +50,11 @@ class Msg {
   static refuse(requestId = null, reason = 'cannot_perform') {
     return new Msg('REFUSE', { requestId, reason });
   }
+
+  /** Create a HANDOFF message for coordinated parcel transfer */
+  static handoff(phase, escapeCell = null) {
+    return new Msg('HANDOFF', { phase, escapeCell });
+  }
 }
 
 export { Msg };

@@ -13,7 +13,6 @@ import { agentLogger } from '../../utils/logger.js';
 
 const MAX_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 200;
-const COOLDOWN_MS = 3000;
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -40,11 +39,7 @@ class GoDeliver {
     const ty = Math.round(y);
     const tileKey = tx + ',' + ty;
     
-    // Skip if delivery zone is on cooldown
-    if (this.parent.belief?.isOnCooldown('delivery', tileKey)) {
-      agentLogger.hot('cooldown', 3000, 'GoDeliver: Zone on cooldown, skipping');
-      throw new Error("target on cooldown");
-    }
+    // No cooldown check - in corridor maps we must keep trying
     
     // Move to delivery zone with retry
     if (Math.round(this.parent.x) !== tx || Math.round(this.parent.y) !== ty) {
@@ -70,10 +65,7 @@ class GoDeliver {
           agentLogger.hot('retry', 3000, 'GoDeliver: Movement failed, retrying in ' + backoff + 'ms');
           await sleep(backoff);
         } else {
-          // All retries exhausted
-          if (this.parent.belief) {
-            this.parent.belief.setCooldown('delivery', tileKey, COOLDOWN_MS);
-          }
+          // All retries exhausted - don't set cooldown, just fail
           throw new Error("delivery failed");
         }
       }

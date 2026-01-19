@@ -50,17 +50,17 @@ function getContentionPenalty(parcel, myX, myY, otherAgents, g) {
 
 /**
  * Returns free parcels sorted by distance, filtering out cooldown targets.
- * Implements ZONING strategy: agents with even ID prefer left half, odd ID prefer right half.
+ * Implements ZONING strategy: agents prefer different halves based on ID hash.
  */
-function getFreeParcelsWithScoring(belief, x, y, g, myId) {
+function getFreeParcelsWithScoring(belief, x, y, g, myId, friendId = null) {
   const parcels = belief.getFreeParcels();
   const otherAgents = belief.getOtherAgents(myId);
   const mapWidth = g.width;
   const halfWidth = mapWidth / 2;
   
-  // Determine my zone based on agent ID
-  const isEvenId = myId % 2 === 0;
-  const myZone = isEvenId ? 'left' : 'right';
+  // Determine my zone based on string comparison of agent IDs
+  // This ensures deterministic zone assignment for any ID format (string/number)
+  const isFirstZone = friendId ? (String(myId) < String(friendId)) : true;
   
   const scored = parcels
     // Filter parcels on cooldown (recently failed targets)
@@ -68,7 +68,8 @@ function getFreeParcelsWithScoring(belief, x, y, g, myId) {
     .map(p => {
       const dist = g.manhattanDistance(x, y, Math.round(p.x), Math.round(p.y));
       const contention = getContentionPenalty(p, x, y, otherAgents, g);
-      const isInMyZone = (isEvenId && p.x < halfWidth) || (!isEvenId && p.x >= halfWidth);
+      // Zone logic: first agent prefers left (x < halfWidth), second prefers right
+      const isInMyZone = (isFirstZone && p.x < halfWidth) || (!isFirstZone && p.x >= halfWidth);
       return { ...p, dist, contested: contention.contested, penalty: contention.penalty, isInMyZone };
     });
   
@@ -176,6 +177,9 @@ function chooseBestSpawner(spawners, myX, myY, otherAgents, g, belief) {
 function optionsGeneration({ me, belief, grid, push, comm }) {
   const g = grid || globalGrid;
   if (!g || me.x === undefined || me.y === undefined) return;
+  
+  // Skip if agent is in handoff protocol (let the protocol complete)
+  if (me.isInHandoff && me.isInHandoff()) return;
 
   const deliveryZones = belief.deliveryZones;
   const loss = me.lossForMovement || 0;
@@ -198,7 +202,7 @@ function optionsGeneration({ me, belief, grid, push, comm }) {
   );
 
   // Get free parcels sorted by distance and contention
-  const candidates = getFreeParcelsWithScoring(belief, me.x, me.y, g, me.id);
+  const candidates = getFreeParcelsWithScoring(belief, me.x, me.y, g, me.id, me.friendId);
   const contestedCount = candidates.filter(p => p.contested).length;
 
   defaultLogger.hot('optionsSummary', 2000, 'options:', 
@@ -232,6 +236,22 @@ function optionsGeneration({ me, belief, grid, push, comm }) {
       const px = Math.round(parcel.x);
       const py = Math.round(parcel.y);
       const myDist = g.manhattanDistance(me.x, me.y, px, py);
+      
+      // CLAIM CHECK: Skip parcels already claimed by friend (unless I'm much closer)
+      const existingClaim = belief.isParcelClaimed(parcel.id);
+      if (existingClaim && existingClaim.agentId !== me.id) {
+        // Friend has a claim - only compete if I'm significantly closer
+        if (friendAgent) {
+          const friendDist = g.manhattanDistance(friendAgent.x, friendAgent.y, px, py);
+          if (myDist >= friendDist * 0.7) {
+            // Friend is close enough to their claim, skip this parcel
+            continue;
+          }
+        } else {
+          // Can't see friend, respect their claim
+          continue;
+        }
+      }
       
       // COLLABORATIVE LOGIC: delegate if friend is significantly closer
       if (friendAgent && comm?.isReady()) {

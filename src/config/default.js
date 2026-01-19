@@ -14,10 +14,10 @@ export default {
   token2: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6ImVhMDlkMyIsIm5hbWUiOiJURVNUMiIsInJvbGUiOiJ1c2VyIiwiaWF0IjoxNzY4MjA5OTY2fQ.DmWyDpMsUtJKMm3TzjZ1jscqME1tjeV4urkUmDD0RyM",
   
   // Multi-agent mode
-  DUAL: false,           // Set to true to enable two-agent coordination
+  DUAL: true,           // Set to true to enable two-agent coordination
   
   // Planning
-  usePddl: true,         // true = PDDL planning, false = BFS movement
+  usePddl: false,         // true = PDDL planning, false = BFS movement
   solver: "local",       // "local" = fast A* solver, "online" = pddl-client
   
   // Debug

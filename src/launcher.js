@@ -94,8 +94,69 @@ adapter.onAgents((agents) => {
   if (config.DUAL && comm.isReady()) {
     const agentsToSend = agents.filter(a => a.id !== me.id);
     comm.sendAgents(agentsToSend);
+    
+    // =========================================================================
+    // CORRIDOR DEADLOCK DETECTION: Trigger handoff protocol when stuck
+    // =========================================================================
+    // Deterministic initiator to avoid race: the agent with lower id
+    if (!me.isInHandoff() && me.friendId && me.id && String(me.id) < String(me.friendId)) {
+      const friend = belief.getAgent(me.friendId);
+      if (friend && gridRef && belief.deliveryZones?.length > 0) {
+        const myX = Math.round(me.x);
+        const myY = Math.round(me.y);
+        const friendX = Math.round(friend.x);
+        const friendY = Math.round(friend.y);
+        const dx = Math.abs(myX - friendX);
+        const dy = Math.abs(myY - friendY);
+        
+        // Check if we're adjacent (potential corridor situation)
+        if ((dx === 1 && dy === 0) || (dx === 0 && dy === 1)) {
+          // Count escape routes for each agent
+          const myEscapeRoutes = getEscapeRoutes(myX, myY, agents, gridRef);
+          const friendEscapeRoutes = getEscapeRoutes(friendX, friendY, agents, gridRef);
+          
+          // Corridor deadlock: both have limited movement options
+          if (myEscapeRoutes.length <= 1 && friendEscapeRoutes.length <= 1) {
+            const friendCarried = belief.getParcelsArray().filter(p => p.carriedBy === me.friendId).length;
+            
+            // Only initiate if one has parcels and other doesn't (handoff makes sense)
+            if ((me.carried > 0 && friendCarried === 0) || (me.carried === 0 && friendCarried > 0)) {
+              const nearestDelivery = belief.deliveryZones[0];
+              const myDist = gridRef.manhattanDistance(myX, myY, nearestDelivery.x, nearestDelivery.y);
+              const friendDist = gridRef.manhattanDistance(friendX, friendY, nearestDelivery.x, nearestDelivery.y);
+              
+              // Agent with parcels farther from delivery should initiate handoff
+              const iShouldHandoff = me.carried > 0 && myDist > friendDist;
+              const friendShouldHandoff = friendCarried > 0 && friendDist > myDist;
+              
+              if (iShouldHandoff || friendShouldHandoff) {
+                defaultLogger.info(`[HANDOFF] Corridor deadlock detected, initiating protocol (initiator=${me.id})`);
+                // send escape cell info so partner knows where to retreat to / drop
+                const escape = myEscapeRoutes[0] || null;
+                comm.initiateHandoff(escape);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 });
+
+/** Helper: Get cells where agent can move (not blocked by other agents) */
+function getEscapeRoutes(x, y, agents, grid) {
+  const adjacent = [
+    { x: x + 1, y },
+    { x: x - 1, y },
+    { x, y: y + 1 },
+    { x, y: y - 1 }
+  ];
+  return adjacent.filter(cell => {
+    if (!grid.isAccessible(cell.x, cell.y)) return false;
+    const occupied = agents.some(a => Math.round(a.x) === cell.x && Math.round(a.y) === cell.y);
+    return !occupied;
+  });
+}
 
 adapter.onConfig((cfg) => {
   defaultLogger.info('Server config received');
@@ -165,6 +226,113 @@ if (config.DUAL) {
       console.log('[COMM] Partner intention: ' + predicate.join(' '));
     }
     belief.registerClaim(senderId, predicate);
+  });
+
+  // =========================================================================
+  // HANDOFF PROTOCOL: Coordinate parcel transfer in narrow passages
+  // =========================================================================
+  comm.on('HANDOFF', async (senderId, data, reply) => {
+    const { phase, escapeCell } = data;
+    
+    // Enter handoff state to pause normal behavior
+    me.setHandoffState(true);
+    
+    // Stop any current intention
+    if (me.intentions.length > 0) {
+      me.intentions[0]?.stop?.();
+      me.intentions = [];
+    }
+    
+    const myX = Math.round(me.x);
+    const myY = Math.round(me.y);
+    const friendCarried = belief.getParcelsArray().filter(p => p.carriedBy === me.friendId).length;
+    
+    if (phase === 'START') {
+      // Partner initiated handoff, I need to respond
+      defaultLogger.info('[HANDOFF] Received START from partner');
+      
+      // Find my escape route
+      const myEscapes = getEscapeRoutes(myX, myY, belief.getAgentsArray(), gridRef);
+      const myEscape = myEscapes[0];
+      
+      if (myEscape) {
+        if (me.carried > 0) {
+          // I have parcels: drop them and retreat
+          await adapter.putdown();
+          me.carried = 0;
+          me.carriedReward = 0;
+          me.carried_parcels = [];
+          await adapter.move(gridRef.getDirection(myX, myY, myEscape.x, myEscape.y));
+          comm.sendHandoff('DROPPED', myEscape);
+        } else {
+          // I don't have parcels: retreat and signal partner to drop
+          await adapter.move(gridRef.getDirection(myX, myY, myEscape.x, myEscape.y));
+          comm.sendHandoff('RETREATED', myEscape);
+        }
+      } else {
+        // Can't move, abort
+        me.setHandoffState(false);
+        comm.sendHandoff('ABORT', null);
+      }
+    }
+    else if (phase === 'DROPPED') {
+      // Partner dropped parcels and retreated, I pick them up
+      defaultLogger.info('[HANDOFF] Partner dropped parcels, picking up');
+      
+      // Find cell with parcels nearby
+      const nearbyParcels = belief.getParcelsArray().filter(p => {
+        if (p.carriedBy) return false;
+        const dist = Math.abs(Math.round(p.x) - myX) + Math.abs(Math.round(p.y) - myY);
+        return dist <= 2;
+      });
+      
+      if (nearbyParcels.length > 0) {
+        const parcel = nearbyParcels[0];
+        const px = Math.round(parcel.x);
+        const py = Math.round(parcel.y);
+        
+        if (px !== myX || py !== myY) {
+          await adapter.move(gridRef.getDirection(myX, myY, px, py));
+        }
+        await adapter.pickup();
+        defaultLogger.info('[HANDOFF] Picked up parcels, completing');
+      }
+      
+      me.setHandoffState(false);
+      comm.sendHandoff('DONE', null);
+    }
+    else if (phase === 'RETREATED') {
+      // Partner retreated, now I drop my parcels for them
+      defaultLogger.info('[HANDOFF] Partner retreated, dropping parcels');
+      
+      if (me.carried > 0) {
+        // Move toward where partner was, drop parcels
+        const friend = belief.getAgent(me.friendId);
+        if (friend && escapeCell) {
+          // Move one step toward the escape cell (where parcels should go)
+          const targetX = escapeCell.x;
+          const targetY = escapeCell.y;
+          await adapter.move(gridRef.getDirection(myX, myY, targetX, targetY));
+          await adapter.putdown();
+          me.carried = 0;
+          me.carriedReward = 0;
+          me.carried_parcels = [];
+          // Move back
+          const newX = Math.round(me.x);
+          const newY = Math.round(me.y);
+          await adapter.move(gridRef.getDirection(newX, newY, myX, myY));
+        }
+        comm.sendHandoff('DROPPED', null);
+      } else {
+        me.setHandoffState(false);
+        comm.sendHandoff('DONE', null);
+      }
+    }
+    else if (phase === 'DONE' || phase === 'ABORT') {
+      // Handoff completed or aborted
+      defaultLogger.info('[HANDOFF] Protocol ' + (phase === 'DONE' ? 'completed' : 'aborted'));
+      me.setHandoffState(false);
+    }
   });
 }
 

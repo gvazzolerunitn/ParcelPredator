@@ -67,6 +67,23 @@ class PDDLMove {
         x: Math.round(a.x),
         y: Math.round(a.y)
       }));
+      
+      // Also add friend's destination from their claim to avoid path collision
+      if (this.parent.friendId) {
+        const friendClaim = belief.getFriendIntention(this.parent.friendId);
+        if (friendClaim && friendClaim.x !== undefined && friendClaim.y !== undefined) {
+          // Avoid friend's target area (but not if it's our target too)
+          const claimX = Math.round(friendClaim.x);
+          const claimY = Math.round(friendClaim.y);
+          if (claimX !== tx || claimY !== ty) {
+            // Check if we're not already tracking this position
+            const alreadyTracked = otherAgents.some(a => a.x === claimX && a.y === claimY);
+            if (!alreadyTracked) {
+              otherAgents.push({ x: claimX, y: claimY });
+            }
+          }
+        }
+      }
     }
 
     // Generate PDDL problem
