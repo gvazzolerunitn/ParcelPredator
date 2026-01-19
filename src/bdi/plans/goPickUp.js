@@ -125,6 +125,13 @@ class GoPickUp {
 
     agentLogger.hot('pickup', 2000, 'Picked up parcels, carrying: ' + this.parent.carried);
     
+    // Notify friend about successful pickup (if in DUAL mode)
+    if (this.parent.comm?.isReady() && id && id !== 'explore') {
+      this.parent.comm.sendComplete(id, true).catch(err => 
+        console.error('[COMM] Failed to send COMPLETE:', err)
+      );
+    }
+    
     // Trigger new intention generation
     if (this.parent.optionsGeneration) {
       this.parent.optionsGeneration({

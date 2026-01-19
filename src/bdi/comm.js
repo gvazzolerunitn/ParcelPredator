@@ -26,6 +26,10 @@ class Comm {
     // Simple rate limiting
     this._lastSendTime = { parcels: 0, agents: 0 };
     this._minSendInterval = 200; // 5 messages/sec max
+    
+    // Pending requests tracking (parcelId -> {resolve, reject, timer})
+    this._pendingRequests = new Map();
+    this._requestTimeout = 5000; // 5s default timeout
   }
 
   /**
@@ -51,6 +55,10 @@ class Comm {
     
     // Register internal REQUEST handler
     this.on('REQUEST', (senderId, content) => this._handleRequest(senderId, content));
+    
+    // Register internal AGREE/REFUSE handlers for pending requests
+    this.on('AGREE', (senderId, parcelId) => this._handleAgree(senderId, parcelId));
+    this.on('REFUSE', (senderId, data) => this._handleRefuse(senderId, data));
     
     // If second agent, initiate handshake
     if (isSecondAgent) {
@@ -219,6 +227,80 @@ class Comm {
     return this.handshakeCompleted && this.friendId !== null;
   }
 
+  /**
+   * Handle AGREE response
+   */
+  _handleAgree(senderId, parcelId) {
+    if (senderId !== this.friendId) return;
+    
+    const pending = this._pendingRequests.get(parcelId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this._pendingRequests.delete(parcelId);
+      commLogger.info('Received AGREE for parcel ' + parcelId);
+      pending.resolve({ accepted: true, parcelId });
+    }
+  }
+
+  /**
+   * Handle REFUSE response
+   */
+  _handleRefuse(senderId, data) {
+    if (senderId !== this.friendId) return;
+    
+    const { requestId, reason } = data;
+    const pending = this._pendingRequests.get(requestId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      this._pendingRequests.delete(requestId);
+      commLogger.info('Received REFUSE for parcel ' + requestId + ' reason: ' + reason);
+      pending.resolve({ accepted: false, parcelId: requestId, reason });
+    }
+  }
+
+  /**
+   * Send REQUEST and wait for AGREE/REFUSE response (Promise-based)
+   * @param {Object} parcel - Parcel to request
+   * @param {Number} timeout - Timeout in ms (default: 5000)
+   * @returns {Promise<{accepted: boolean, parcelId: string, reason?: string}>}
+   */
+  async sendRequest(parcel, timeout = this._requestTimeout) {
+    if (!this.isReady()) {
+      return Promise.reject(new Error('Communication not ready'));
+    }
+
+    const parcelId = parcel.id;
+    
+    // Check if already pending
+    if (this._pendingRequests.has(parcelId)) {
+      commLogger.warn('Request already pending for parcel ' + parcelId);
+      return Promise.reject(new Error('Request already pending'));
+    }
+
+    return new Promise((resolve, reject) => {
+      // Setup timeout
+      const timer = setTimeout(() => {
+        this._pendingRequests.delete(parcelId);
+        commLogger.warn('Request timeout for parcel ' + parcelId);
+        resolve({ accepted: false, parcelId, reason: 'timeout' });
+      }, timeout);
+
+      // Store pending request
+      this._pendingRequests.set(parcelId, { resolve, reject, timer });
+
+      // Send REQUEST message
+      const requestMsg = Msg.request(parcel);
+      this.adapter.say(this.friendId, requestMsg).catch(err => {
+        clearTimeout(timer);
+        this._pendingRequests.delete(parcelId);
+        commLogger.error('Failed to send REQUEST:', err);
+        reject(err);
+      });
+
+      commLogger.info('Sent REQUEST for parcel ' + parcelId);
+    });
+  }
+
   // =========================================================================
   // SENDING METHODS
   // =========================================================================
@@ -284,6 +366,16 @@ class Comm {
     const msg = Msg.handoff(phase, escapeCell);
     await this.adapter.say(this.friendId, msg);
     commLogger.info('HANDOFF ' + phase + ' sent');
+  }
+
+  /**
+   * Send completion notification after successful pickup
+   */
+  async sendComplete(parcelId, success = true) {
+    if (!this.isReady()) return;
+    const msg = Msg.complete(parcelId, success);
+    await this.adapter.say(this.friendId, msg);
+    commLogger.info('Sent COMPLETE for parcel ' + parcelId + ' success=' + success);
   }
 }
 

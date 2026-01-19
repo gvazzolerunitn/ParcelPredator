@@ -8,7 +8,6 @@
 
 import { grid as globalGrid } from "../utils/grid.js";
 import { defaultLogger } from '../utils/logger.js';
-import { Msg } from './Msg.js';
 
 // Cooldown tracking for REQUEST messages to avoid spam
 const requestCooldowns = new Map(); // parcelId -> timestamp
@@ -265,10 +264,16 @@ function optionsGeneration({ me, belief, grid, push, comm }) {
           // Delegate to friend via REQUEST
           defaultLogger.hot('delegate', 3000, 'Delegating ' + parcel.id + ' to friend (myDist=' + myDist + ', friendDist=' + friendDist + ')');
           
-          const requestMsg = Msg.request(parcel);
-          comm.adapter.say(comm.friendId, requestMsg).catch(err => 
-            console.error('[COMM] Failed to send REQUEST:', err)
-          );
+          // Use sendRequest (Promise-based) instead of direct say
+          comm.sendRequest(parcel).then(response => {
+            if (response.accepted) {
+              defaultLogger.hot('delegateAccepted', 3000, 'Friend AGREED to take ' + parcel.id);
+            } else {
+              defaultLogger.hot('delegateRefused', 3000, 'Friend REFUSED ' + parcel.id + ' (' + (response.reason || 'unknown') + ')');
+            }
+          }).catch(err => {
+            console.error('[COMM] sendRequest error:', err);
+          });
           
           // Set cooldown to avoid spam
           requestCooldowns.set(parcel.id, now + REQUEST_COOLDOWN_MS);

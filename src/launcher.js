@@ -228,6 +228,18 @@ if (config.DUAL) {
     belief.registerClaim(senderId, predicate);
   });
 
+  // Handle COMPLETE notification (partner picked up a parcel)
+  comm.on('COMPLETE', (senderId, data, reply) => {
+    const { parcelId, success } = data;
+    if (success && parcelId) {
+      // Remove parcel from belief (partner successfully picked it up)
+      belief.removeParcel(parcelId);
+      // Clear any cooldown for this parcel
+      belief.clearCooldown('parcel', parcelId);
+      defaultLogger.hot('partnerComplete', 3000, 'Partner completed pickup of ' + parcelId);
+    }
+  });
+
   // =========================================================================
   // HANDOFF PROTOCOL: Coordinate parcel transfer in narrow passages
   // =========================================================================

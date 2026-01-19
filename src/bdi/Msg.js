@@ -55,6 +55,11 @@ class Msg {
   static handoff(phase, escapeCell = null) {
     return new Msg('HANDOFF', { phase, escapeCell });
   }
+
+  /** Create a COMPLETE message to notify pickup completion */
+  static complete(parcelId, success = true) {
+    return new Msg('COMPLETE', { parcelId, success });
+  }
 }
 
 export { Msg };

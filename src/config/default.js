@@ -17,7 +17,7 @@ export default {
   DUAL: true,           // Set to true to enable two-agent coordination
   
   // Planning
-  usePddl: false,         // true = PDDL planning, false = BFS movement
+  usePddl: true,         // true = PDDL planning, false = BFS movement
   solver: "local",       // "local" = fast A* solver, "online" = pddl-client
   
   // Debug
