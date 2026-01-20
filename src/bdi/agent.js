@@ -24,6 +24,8 @@ class Agent {
     // Coordination state for corridor handoff protocol
     this._coordinationMode = false;      // Flag for handoff/coordination protocol
     this._coordinationCooldownUntil = 0; // Cooldown to prevent rapid re-triggering
+    // Ignore recently dropped parcels to avoid yo-yo
+    this.ignoredParcels = new Map(); // key "x,y" -> expiry timestamp
   }
 
   /** Check if agent is in handoff state or cooldown */
@@ -45,6 +47,22 @@ class Agent {
   /** Alias to align with coordination wording */
   setCoordinationState(value) {
     this.setHandoffState(value);
+  }
+
+  ignoreParcelAt(x, y, duration = 3000) {
+    const key = `${Math.round(x)},${Math.round(y)}`;
+    this.ignoredParcels.set(key, Date.now() + duration);
+  }
+
+  isParcelIgnored(x, y) {
+    const key = `${Math.round(x)},${Math.round(y)}`;
+    if (!this.ignoredParcels.has(key)) return false;
+    const expiry = this.ignoredParcels.get(key);
+    if (Date.now() > expiry) {
+      this.ignoredParcels.delete(key);
+      return false;
+    }
+    return true;
   }
 
   setValues({ id, name, x, y, score, carried }) {

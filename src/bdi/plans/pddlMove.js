@@ -164,8 +164,8 @@ class PDDLMove {
       const moveOk = await adapter.move(action);
       if (!moveOk) {
         if (this._isFriendBlocking(next, belief)) {
-          await this._triggerCoordination(next);
-          throw new ConflictDetectedError("blocked by friend");
+          const started = await this._triggerCoordination(next);
+          throw new ConflictDetectedError(started ? "handoff_immediate_exit" : "blocked by friend");
         }
         agentLogger.hot('moveObstructed', 5000, 'PDDLMove: Move failed, path obstructed');
         return "obstructed";
@@ -200,8 +200,10 @@ class PDDLMove {
 
   async _triggerCoordination(blockedCell) {
     if (this.parent.comm && this.parent.comm.beginCoordinationProtocol) {
-      await this.parent.comm.beginCoordinationProtocol({ blockedCell });
+      const started = await this.parent.comm.beginCoordinationProtocol({ blockedCell });
+      return !!started;
     }
+    return false;
   }
 }
 

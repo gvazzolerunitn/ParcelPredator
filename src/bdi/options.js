@@ -201,7 +201,8 @@ function optionsGeneration({ me, belief, grid, push, comm }) {
   );
 
   // Get free parcels sorted by distance and contention
-  const candidates = getFreeParcelsWithScoring(belief, me.x, me.y, g, me.id, me.friendId);
+  const candidates = getFreeParcelsWithScoring(belief, me.x, me.y, g, me.id, me.friendId)
+    .filter(p => !(me.isParcelIgnored && me.isParcelIgnored(p.x, p.y)));
   const contestedCount = candidates.filter(p => p.contested).length;
 
   defaultLogger.hot('optionsSummary', 2000, 'options:', 

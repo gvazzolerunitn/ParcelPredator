@@ -50,6 +50,19 @@ class Comm {
 
     // Coordination protocol runtime flag
     this._protocolActive = false;
+
+    // Throttled logging
+    this._lastLogTime = 0;
+    this._lastLogMsg = '';
+  }
+
+  _logThrottled(msg) {
+    const now = Date.now();
+    if (msg !== this._lastLogMsg || now - this._lastLogTime >= 1000) {
+      commLogger.warn(msg);
+      this._lastLogMsg = msg;
+      this._lastLogTime = now;
+    }
   }
 
   /**
@@ -428,8 +441,21 @@ class Comm {
           await this._handleAcquirePhase();
           break;
         case PROTOCOL_STUCK:
-          commLogger.warn('[PROTOCOL] Partner is stuck, resetting coordination');
-          this._resetCoordination();
+          commLogger.warn('[PROTOCOL] Partner stuck. Switching roles: I will yield instead.');
+          {
+            const yielded = await this._handleYieldPhase(true);
+            if (yielded) {
+              this._logThrottled('[PROTOCOL] Yield succeeded, asking partner to release');
+              break;
+            }
+
+            // If yield failed, end protocol and back off to avoid ping-pong
+            await this._sendProtocol(PROTOCOL_END);
+            const backoff = 1000 + Math.floor(Math.random() * 2000);
+            this._logThrottled('[PROTOCOL] Yield failed during STUCK, backing off for ' + backoff + 'ms');
+            await this._delay(backoff);
+            this._resetCoordination();
+          }
           break;
         case PROTOCOL_END:
           this._resetCoordination();
@@ -445,7 +471,7 @@ class Comm {
     }
   }
 
-  async _handleYieldPhase() {
+  async _handleYieldPhase(suppressStuck = false) {
     const { x, y } = this._myPosition();
     const friend = this._friendAgent();
     const fx = friend ? Math.round(friend.x) : null;
@@ -461,19 +487,23 @@ class Comm {
       const dir = grid.getDirection(x, y, target.x, target.y);
       const ok = await this.adapter.move(dir);
       if (!ok) {
-        commLogger.warn('[PROTOCOL] Yield move failed into ' + target.x + ',' + target.y + ' sending STUCK');
-        await this._sendProtocol(PROTOCOL_STUCK);
+        if (!suppressStuck) {
+          this._logThrottled('[PROTOCOL] Yield move failed into ' + target.x + ',' + target.y + ' sending STUCK');
+          await this._sendProtocol(PROTOCOL_STUCK);
+        }
         this._resetCoordination();
-        return;
+        return false;
       }
-      // After yielding, ask partner to release parcels
       await this._sendProtocol(PROTOCOL_RELEASE);
-      return;
+      return true;
     }
 
-    commLogger.warn('[PROTOCOL] No free adjacent cell to yield, sending STUCK');
-    await this._sendProtocol(PROTOCOL_STUCK);
+    if (!suppressStuck) {
+      this._logThrottled('[PROTOCOL] No free adjacent cell to yield, sending STUCK');
+      await this._sendProtocol(PROTOCOL_STUCK);
+    }
     this._resetCoordination();
+    return false;
   }
 
   async _handleAcquirePhase() {
@@ -530,6 +560,7 @@ class Comm {
       const moved = await this.adapter.move(dir);
       if (moved) {
         await this.adapter.putdown();
+          this.me.ignoreParcelAt(lateral.x, lateral.y, 3000);
         this.me.carried = 0;
         this.me.carriedReward = 0;
         const inverse = INVERSE_DIR[dir];
@@ -539,7 +570,7 @@ class Comm {
         await this._sendProtocol(PROTOCOL_ACQUIRE);
         return;
       }
-      commLogger.warn('[PROTOCOL] Lateral release move failed, trying fallback');
+        this._logThrottled('[PROTOCOL] Lateral release move failed, trying fallback');
     }
 
     // Attempt 2: forward toward friend (corridor fallback)
@@ -551,6 +582,7 @@ class Comm {
         const moved = await this.adapter.move(dirToFriend);
         if (moved) {
           await this.adapter.putdown();
+            this.me.ignoreParcelAt(forward.x, forward.y, 3000);
           this.me.carried = 0;
           this.me.carriedReward = 0;
           const inverse = INVERSE_DIR[dirToFriend];
@@ -563,7 +595,7 @@ class Comm {
       }
     }
 
-    commLogger.warn('[PROTOCOL] Release failed: no viable move, sending STUCK');
+    this._logThrottled('[PROTOCOL] Release failed: no viable move, sending STUCK');
     await this._sendProtocol(PROTOCOL_STUCK);
     this._resetCoordination();
   }
@@ -612,6 +644,10 @@ class Comm {
   _resetCoordination() {
     this._protocolActive = false;
     (this.me.setCoordinationState || this.me.setHandoffState).call(this.me, false);
+  }
+
+  _delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 
   async _sendProtocol(phase) {

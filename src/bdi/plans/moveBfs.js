@@ -134,8 +134,8 @@ class MoveBfs {
         // Verifichiamo con !ok per catturare false, undefined, null
         if (!ok) {
           if (this._isFriendBlocking(next, belief)) {
-            await this._triggerCoordination(next);
-            throw new ConflictDetectedError("blocked by friend");
+            const started = await this._triggerCoordination(next);
+            throw new ConflictDetectedError(started ? "handoff_immediate_exit" : "blocked by friend");
           }
           // Movimento bloccato: exponential backoff e riprova
           blocked = true;
@@ -176,8 +176,10 @@ class MoveBfs {
 
   async _triggerCoordination(blockedCell) {
     if (this.parent.comm && this.parent.comm.beginCoordinationProtocol) {
-      await this.parent.comm.beginCoordinationProtocol({ blockedCell });
+      const started = await this.parent.comm.beginCoordinationProtocol({ blockedCell });
+      return !!started;
     }
+    return false;
   }
 }
 
