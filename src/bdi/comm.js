@@ -16,6 +16,7 @@ const PROTOCOL_YIELD = 'PROTOCOL_YIELD';   // Ask partner to step into a pocket
 const PROTOCOL_RELEASE = 'PROTOCOL_RELEASE'; // Ask partner to drop parcels and retreat
 const PROTOCOL_ACQUIRE = 'PROTOCOL_ACQUIRE'; // Ask partner to collect dropped parcels
 const PROTOCOL_END = 'PROTOCOL_END';         // Coordination finished
+const PROTOCOL_STUCK = 'PROTOCOL_STUCK';     // Cannot yield; signal failure
 
 const DIR_TO_DELTA = {
   up: { dx: 0, dy: 1 },
@@ -387,26 +388,13 @@ class Comm {
 
     const carrying = this.me.carried && this.me.carried > 0;
 
-    // If I am empty, try to yield myself first
     if (!carrying) {
-      const { x, y } = this._myPosition();
-      const pocket = this._findPocket(x, y);
-
-      if (pocket) {
-        commLogger.info('[PROTOCOL] I am empty, yielding locally into pocket at ' + pocket.x + ',' + pocket.y);
-        try {
-          await this._handleYieldPhase();
-          return true; // _handleYieldPhase will drive the protocol forward
-        } catch (err) {
-          commLogger.warn('[PROTOCOL] Local yield failed, fallback to partner: ' + err.message);
-        }
-      } else {
-        commLogger.info('[PROTOCOL] I am empty but no pocket found, asking partner to yield');
-      }
-    } else {
-      commLogger.info('[PROTOCOL] I am carrying, requesting partner to yield');
+      commLogger.info('[PROTOCOL] I am empty, yielding locally');
+      await this._handleYieldPhase();
+      return true;
     }
 
+    commLogger.info('[PROTOCOL] I am carrying, requesting partner to yield');
     await this._sendProtocol(PROTOCOL_YIELD);
     return true;
   }
@@ -439,6 +427,10 @@ class Comm {
         case PROTOCOL_ACQUIRE:
           await this._handleAcquirePhase();
           break;
+        case PROTOCOL_STUCK:
+          commLogger.warn('[PROTOCOL] Partner is stuck, resetting coordination');
+          this._resetCoordination();
+          break;
         case PROTOCOL_END:
           this._resetCoordination();
           break;
@@ -455,27 +447,33 @@ class Comm {
 
   async _handleYieldPhase() {
     const { x, y } = this._myPosition();
-    const pocket = this._findPocket(x, y);
+    const friend = this._friendAgent();
+    const fx = friend ? Math.round(friend.x) : null;
+    const fy = friend ? Math.round(friend.y) : null;
 
-    if (!pocket) {
-      commLogger.warn('[PROTOCOL] No free pocket available to yield');
-      this._resetCoordination();
-      await this._sendProtocol(PROTOCOL_END);
+    const candidates = this._adjacentAccessible(x, y)
+      .filter(c => !this._isOccupiedByAgent(c.x, c.y))
+      .filter(c => !(friend && Math.round(c.x) === fx && Math.round(c.y) === fy));
+
+    const target = candidates[0];
+
+    if (target) {
+      const dir = grid.getDirection(x, y, target.x, target.y);
+      const ok = await this.adapter.move(dir);
+      if (!ok) {
+        commLogger.warn('[PROTOCOL] Yield move failed into ' + target.x + ',' + target.y + ' sending STUCK');
+        await this._sendProtocol(PROTOCOL_STUCK);
+        this._resetCoordination();
+        return;
+      }
+      // After yielding, ask partner to release parcels
+      await this._sendProtocol(PROTOCOL_RELEASE);
       return;
     }
 
-    const dir = grid.getDirection(x, y, pocket.x, pocket.y);
-
-    if (this.me.carried > 0) {
-      await this.adapter.putdown();
-      this.me.carried = 0;
-      this.me.carriedReward = 0;
-      await this.adapter.move(dir);
-      await this._sendProtocol(PROTOCOL_ACQUIRE);
-    } else {
-      await this.adapter.move(dir);
-      await this._sendProtocol(PROTOCOL_RELEASE);
-    }
+    commLogger.warn('[PROTOCOL] No free adjacent cell to yield, sending STUCK');
+    await this._sendProtocol(PROTOCOL_STUCK);
+    this._resetCoordination();
   }
 
   async _handleAcquirePhase() {
@@ -516,31 +514,58 @@ class Comm {
       return;
     }
 
-    const pocket = this._findPocketTowardsFriend(x, y, friend);
-    if (!pocket) {
-      commLogger.warn('[PROTOCOL] No retreat pocket toward friend');
-      this._resetCoordination();
-      await this._sendProtocol(PROTOCOL_END);
-      return;
-    }
+    const fx = Math.round(friend.x);
+    const fy = Math.round(friend.y);
+    const dirToFriend = grid.getDirection(x, y, fx, fy);
 
-    const dir = grid.getDirection(x, y, pocket.x, pocket.y);
-    await this.adapter.move(dir);
+    const adjacent = this._adjacentAccessible(x, y)
+      .filter(c => !this._isOccupiedByAgent(c.x, c.y))
+      .filter(c => !(Math.round(c.x) === fx && Math.round(c.y) === fy));
 
-    if (this.me.carried > 0) {
-      await this.adapter.putdown();
-      this.me.carried = 0;
-      this.me.carriedReward = 0;
-      // Step back to give space
-      const inverse = INVERSE_DIR[dir];
-      if (inverse) {
-        await this.adapter.move(inverse);
+    // Attempt 1: lateral pocket (not towards friend)
+    const lateral = adjacent.find(c => grid.getDirection(x, y, c.x, c.y) !== dirToFriend);
+
+    if (lateral) {
+      const dir = grid.getDirection(x, y, lateral.x, lateral.y);
+      const moved = await this.adapter.move(dir);
+      if (moved) {
+        await this.adapter.putdown();
+        this.me.carried = 0;
+        this.me.carriedReward = 0;
+        const inverse = INVERSE_DIR[dir];
+        if (inverse) {
+          await this.adapter.move(inverse);
+        }
+        await this._sendProtocol(PROTOCOL_ACQUIRE);
+        return;
       }
-      await this._sendProtocol(PROTOCOL_ACQUIRE);
-    } else {
-      this._resetCoordination();
-      await this._sendProtocol(PROTOCOL_END);
+      commLogger.warn('[PROTOCOL] Lateral release move failed, trying fallback');
     }
+
+    // Attempt 2: forward toward friend (corridor fallback)
+    if (dirToFriend) {
+      const forward = this._adjacentAccessible(x, y)
+        .find(c => grid.getDirection(x, y, c.x, c.y) === dirToFriend && !this._isOccupiedByAgent(c.x, c.y));
+
+      if (forward) {
+        const moved = await this.adapter.move(dirToFriend);
+        if (moved) {
+          await this.adapter.putdown();
+          this.me.carried = 0;
+          this.me.carriedReward = 0;
+          const inverse = INVERSE_DIR[dirToFriend];
+          if (inverse) {
+            await this.adapter.move(inverse);
+          }
+          await this._sendProtocol(PROTOCOL_ACQUIRE);
+          return;
+        }
+      }
+    }
+
+    commLogger.warn('[PROTOCOL] Release failed: no viable move, sending STUCK');
+    await this._sendProtocol(PROTOCOL_STUCK);
+    this._resetCoordination();
   }
 
   _adjacentAccessible(x, y) {
