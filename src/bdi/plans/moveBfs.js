@@ -1,5 +1,6 @@
 import { adapter } from "../../client/adapter.js";
 import { grid } from "../../utils/grid.js";
+import { ConflictDetectedError } from "../errors.js";
 
 // ============================================================================
 // CONFIGURAZIONE RETRY E BACKOFF
@@ -7,6 +8,12 @@ import { grid } from "../../utils/grid.js";
 const MAX_RETRIES = 4;
 const BASE_DELAY_MS = 100;
 // Exponential backoff: 100, 200, 400, 800 ms
+const DIR_TO_DELTA = {
+  up: { dx: 0, dy: 1 },
+  down: { dx: 0, dy: -1 },
+  left: { dx: -1, dy: 0 },
+  right: { dx: 1, dy: 0 }
+};
 
 // ============================================================================
 // TARGET COOLDOWN: evita di riprovare lo stesso target subito dopo fallimenti
@@ -96,6 +103,8 @@ class MoveBfs {
       
       const sx = Math.round(this.parent.x);
       const sy = Math.round(this.parent.y);
+      let curX = sx;
+      let curY = sy;
       
       // Già arrivato
       if (sx === tx && sy === ty) {
@@ -118,11 +127,16 @@ class MoveBfs {
       let blocked = false;
       for (const dir of path) {
         if (this.stopped) throw new Error("stopped");
+        const next = this._nextCell(curX, curY, dir);
         const ok = await adapter.move(dir);
         
         // emitMove ritorna {x,y} se successo, false se bloccato
         // Verifichiamo con !ok per catturare false, undefined, null
         if (!ok) {
+          if (this._isFriendBlocking(next, belief)) {
+            await this._triggerCoordination(next);
+            throw new ConflictDetectedError("blocked by friend");
+          }
           // Movimento bloccato: exponential backoff e riprova
           blocked = true;
           retries++;
@@ -132,6 +146,8 @@ class MoveBfs {
           }
           break; // Esci dal for per ricalcolare il path
         }
+        curX = next.x;
+        curY = next.y;
       }
       
       if (!blocked) {
@@ -143,6 +159,25 @@ class MoveBfs {
     // Dopo MAX_RETRIES, registra fallimento e lancia errore
     markTargetFailed(tx, ty);
     throw new Error("move blocked after retries");
+  }
+
+  _nextCell(x, y, dir) {
+    const delta = DIR_TO_DELTA[dir];
+    if (!delta) return { x, y };
+    return { x: x + delta.dx, y: y + delta.dy };
+  }
+
+  _isFriendBlocking(next, belief) {
+    if (!belief || !this.parent.friendId || !belief.getAgent) return false;
+    const friend = belief.getAgent(this.parent.friendId);
+    if (!friend) return false;
+    return Math.round(friend.x) === Math.round(next.x) && Math.round(friend.y) === Math.round(next.y);
+  }
+
+  async _triggerCoordination(blockedCell) {
+    if (this.parent.comm && this.parent.comm.beginCoordinationProtocol) {
+      await this.parent.comm.beginCoordinationProtocol({ blockedCell });
+    }
   }
 }
 

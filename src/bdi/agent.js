@@ -21,25 +21,30 @@ class Agent {
     this.friendId = null;         // ID of collaborative friend agent
     this.isSecondAgent = false;   // true if this is agent 2
     this.comm = null;             // Communication module reference
-    // Handoff state for coordinated parcel transfer
-    this._inHandoff = false;      // Flag for handoff protocol
-    this._handoffCooldownUntil = 0;  // Cooldown to prevent rapid re-triggering
+    // Coordination state for corridor handoff protocol
+    this._coordinationMode = false;      // Flag for handoff/coordination protocol
+    this._coordinationCooldownUntil = 0; // Cooldown to prevent rapid re-triggering
   }
 
   /** Check if agent is in handoff state or cooldown */
   isInHandoff() {
-    if (this._inHandoff) return true;
-    if (Date.now() < this._handoffCooldownUntil) return true;
+    if (this._coordinationMode) return true;
+    if (Date.now() < this._coordinationCooldownUntil) return true;
     return false;
   }
 
   /** Set handoff state (with cooldown on exit) */
   setHandoffState(value) {
-    this._inHandoff = value;
+    this._coordinationMode = value;
     if (!value) {
       // Set 3s cooldown after handoff ends
-      this._handoffCooldownUntil = Date.now() + 3000;
+      this._coordinationCooldownUntil = Date.now() + 3000;
     }
+  }
+
+  /** Alias to align with coordination wording */
+  setCoordinationState(value) {
+    this.setHandoffState(value);
   }
 
   setValues({ id, name, x, y, score, carried }) {
@@ -59,6 +64,7 @@ class Agent {
    * If replace=false, just queues the intention without interrupting.
    */
   push(predicate, replace = true) {
+    if (this.isInHandoff()) return;
     // Avoid duplicates
     const isDuplicate = this.intentions.some(i => i.predicate.join(" ") === predicate.join(" "));
     if (isDuplicate) return;
@@ -78,6 +84,11 @@ class Agent {
       await new Promise(res => setTimeout(res, 100));
     }
     while (true) {
+      // Brain-freeze: pause BDI while coordination protocol runs
+      if (this.isInHandoff()) {
+        await new Promise(res => setTimeout(res, 50));
+        continue;
+      }
       // Se idle, genera nuove opzioni
       if (this.intentions.length === 0 && this.optionsGeneration) {
         this.optionsGeneration({

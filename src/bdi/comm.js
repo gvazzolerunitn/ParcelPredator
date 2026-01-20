@@ -9,6 +9,22 @@
 
 import { Msg } from './Msg.js';
 import { commLogger } from '../utils/logger.js';
+import { grid } from '../utils/grid.js';
+
+// Coordination protocol phases (renamed from MOVE/TAKE/DROP)
+const PROTOCOL_YIELD = 'PROTOCOL_YIELD';   // Ask partner to step into a pocket
+const PROTOCOL_RELEASE = 'PROTOCOL_RELEASE'; // Ask partner to drop parcels and retreat
+const PROTOCOL_ACQUIRE = 'PROTOCOL_ACQUIRE'; // Ask partner to collect dropped parcels
+const PROTOCOL_END = 'PROTOCOL_END';         // Coordination finished
+
+const DIR_TO_DELTA = {
+  up: { dx: 0, dy: 1 },
+  down: { dx: 0, dy: -1 },
+  left: { dx: -1, dy: 0 },
+  right: { dx: 1, dy: 0 }
+};
+
+const INVERSE_DIR = { up: 'down', down: 'up', left: 'right', right: 'left' };
 
 class Comm {
   constructor(adapter, me, belief, config) {
@@ -30,11 +46,9 @@ class Comm {
     // Pending requests tracking (parcelId -> {resolve, reject, timer})
     this._pendingRequests = new Map();
     this._requestTimeout = 5000; // 5s default timeout
-    
-    // Handoff tracking (for ACK/retry)
-    this._handoffPending = null; // { resolve, reject, timer, attempt }
-    this._handoffTimeout = 3000; // 3s per attempt
-    this._handoffMaxAttempts = 2; // Max retry attempts
+
+    // Coordination protocol runtime flag
+    this._protocolActive = false;
   }
 
   /**
@@ -103,6 +117,11 @@ class Comm {
     // Handle handshake internally
     if (header === 'HANDSHAKE') {
       await this._handleHandshake(senderId, content, replyCallback);
+      return;
+    }
+
+    if (header === 'HANDOFF') {
+      await this._handleHandoff(senderId, content);
       return;
     }
 
@@ -342,93 +361,252 @@ class Comm {
   }
 
   /**
-   * Initiate handoff protocol with ACK and retry (called when deadlock detected)
+   * Start the coordination protocol (initiator side)
    */
-  async initiateHandoff(escapeCell) {
+  async initiateHandoff() {
+    return this.beginCoordinationProtocol();
+  }
+
+  /**
+   * Entry point used by movement plans when a friend blocks the path
+   */
+  async beginCoordinationProtocol() {
     if (!this.isReady()) return false;
-    
-    // Set local handoff state
-    this.me.setHandoffState(true);
-    
-    // Stop current intention
+    if (this.me.isInHandoff && this.me.isInHandoff()) return true;
+
+    this._protocolActive = true;
+    (this.me.setCoordinationState || this.me.setHandoffState).call(this.me, true);
+
+    // Stop current intention to avoid competing moves
     if (this.me.intentions?.length > 0) {
       this.me.intentions[0]?.stop?.();
       this.me.intentions = [];
     }
-    
-    commLogger.info('[HANDOFF] Initiating protocol with retry -> sending START to ' + this.friendId);
-    
-    // Try up to maxAttempts to get ACK
-    for (let attempt = 1; attempt <= this._handoffMaxAttempts; attempt++) {
-      try {
-        const ackReceived = await this._sendHandoffStartWithAck(escapeCell, attempt);
-        if (ackReceived) {
-          commLogger.info('[HANDOFF] START acknowledged by partner on attempt ' + attempt);
-          return true;
+
+    commLogger.info('[PROTOCOL] Initiating corridor coordination with ' + this.friendId);
+
+    const carrying = this.me.carried && this.me.carried > 0;
+
+    // If I am empty, try to yield myself first
+    if (!carrying) {
+      const { x, y } = this._myPosition();
+      const pocket = this._findPocket(x, y);
+
+      if (pocket) {
+        commLogger.info('[PROTOCOL] I am empty, yielding locally into pocket at ' + pocket.x + ',' + pocket.y);
+        try {
+          await this._handleYieldPhase();
+          return true; // _handleYieldPhase will drive the protocol forward
+        } catch (err) {
+          commLogger.warn('[PROTOCOL] Local yield failed, fallback to partner: ' + err.message);
         }
-      } catch (err) {
-        commLogger.warn('[HANDOFF] START attempt ' + attempt + ' failed: ' + err.message);
+      } else {
+        commLogger.info('[PROTOCOL] I am empty but no pocket found, asking partner to yield');
       }
-      
-      // Wait a bit before retry
-      if (attempt < this._handoffMaxAttempts) {
-        await new Promise(res => setTimeout(res, 500));
-      }
+    } else {
+      commLogger.info('[PROTOCOL] I am carrying, requesting partner to yield');
     }
-    
-    commLogger.error('[HANDOFF] Failed to initiate after ' + this._handoffMaxAttempts + ' attempts - ABORTING');
-    this.me.setHandoffState(false);
-    return false;
-  }
-  
-  /**
-   * Send START and wait for ACK
-   */
-  async _sendHandoffStartWithAck(escapeCell, attempt) {
-    return new Promise((resolve, reject) => {
-      // Setup timeout
-      const timer = setTimeout(() => {
-        this._handoffPending = null;
-        commLogger.warn('[HANDOFF] Timeout waiting for ACK_START (attempt ' + attempt + ')');
-        resolve(false); // Timeout = no ACK
-      }, this._handoffTimeout);
-      
-      // Store pending
-      this._handoffPending = { resolve, reject, timer, attempt };
-      
-      // Send START
-      const msg = Msg.handoff('START', escapeCell);
-      this.adapter.say(this.friendId, msg).catch(err => {
-        clearTimeout(timer);
-        this._handoffPending = null;
-        reject(err);
-      });
-      
-      commLogger.info('[HANDOFF] START sent (attempt ' + attempt + '), waiting for ACK...');
-    });
-  }
-  
-  /**
-   * Handle ACK_START (called by message handler)
-   */
-  _handleHandoffAck() {
-    if (this._handoffPending) {
-      clearTimeout(this._handoffPending.timer);
-      const pending = this._handoffPending;
-      this._handoffPending = null;
-      pending.resolve(true); // ACK received
-    }
+
+    await this._sendProtocol(PROTOCOL_YIELD);
+    return true;
   }
 
   /**
-   * Send handoff protocol message
+   * Handle coordination messages (translated from ASAPlanners handleMsg MOVE/TAKE/DROP)
    */
-  async sendHandoff(phase, escapeCell) {
+  async _handleHandoff(senderId, payload) {
     if (!this.isReady()) return;
-    commLogger.info('Sending HANDOFF ' + phase + ' to ' + this.friendId + ' data=' + JSON.stringify(escapeCell));
-    const msg = Msg.handoff(phase, escapeCell);
+    const phase = payload?.phase || payload;
+    if (!phase) return;
+
+    // Keep deterministic friend binding
+    if (!this.friendId) {
+      this.friendId = senderId;
+      this.me.friendId = senderId;
+    }
+
+    this._protocolActive = true;
+    (this.me.setCoordinationState || this.me.setHandoffState).call(this.me, true);
+
+    try {
+      switch (phase) {
+        case PROTOCOL_YIELD:
+          await this._handleYieldPhase();
+          break;
+        case PROTOCOL_RELEASE:
+          await this._handleReleasePhase();
+          break;
+        case PROTOCOL_ACQUIRE:
+          await this._handleAcquirePhase();
+          break;
+        case PROTOCOL_END:
+          this._resetCoordination();
+          break;
+        default:
+          commLogger.warn('[PROTOCOL] Unknown phase ' + phase);
+          break;
+      }
+    } catch (err) {
+      commLogger.error('[PROTOCOL] Error in phase ' + phase + ': ' + err.message);
+      this._resetCoordination();
+      await this._sendProtocol(PROTOCOL_END);
+    }
+  }
+
+  async _handleYieldPhase() {
+    const { x, y } = this._myPosition();
+    const pocket = this._findPocket(x, y);
+
+    if (!pocket) {
+      commLogger.warn('[PROTOCOL] No free pocket available to yield');
+      this._resetCoordination();
+      await this._sendProtocol(PROTOCOL_END);
+      return;
+    }
+
+    const dir = grid.getDirection(x, y, pocket.x, pocket.y);
+
+    if (this.me.carried > 0) {
+      await this.adapter.putdown();
+      this.me.carried = 0;
+      this.me.carriedReward = 0;
+      await this.adapter.move(dir);
+      await this._sendProtocol(PROTOCOL_ACQUIRE);
+    } else {
+      await this.adapter.move(dir);
+      await this._sendProtocol(PROTOCOL_RELEASE);
+    }
+  }
+
+  async _handleAcquirePhase() {
+    const { x, y } = this._myPosition();
+    const parcelCell = this._findAdjacentParcelCell(x, y);
+
+    if (!parcelCell) {
+      commLogger.warn('[PROTOCOL] No adjacent parcel to acquire');
+      this._resetCoordination();
+      await this._sendProtocol(PROTOCOL_END);
+      return;
+    }
+
+    const dir = grid.getDirection(x, y, parcelCell.x, parcelCell.y);
+    await this.adapter.move(dir);
+    const pickupResult = await this.adapter.pickup();
+
+    // Stop any current intention and clear queue
+    if (this.me.intentions?.length > 0) {
+      this.me.intentions[0]?.stop?.();
+      this.me.intentions = [];
+    }
+
+    const picked = Array.isArray(pickupResult) ? pickupResult.length : (pickupResult ? 1 : 0);
+    this.me.carried = picked || this.me.carried;
+
+    this._resetCoordination();
+    await this._sendProtocol(PROTOCOL_END);
+  }
+
+  async _handleReleasePhase() {
+    const { x, y } = this._myPosition();
+    const friend = this._friendAgent();
+    if (!friend) {
+      commLogger.warn('[PROTOCOL] Friend not in belief, aborting release');
+      this._resetCoordination();
+      await this._sendProtocol(PROTOCOL_END);
+      return;
+    }
+
+    const pocket = this._findPocketTowardsFriend(x, y, friend);
+    if (!pocket) {
+      commLogger.warn('[PROTOCOL] No retreat pocket toward friend');
+      this._resetCoordination();
+      await this._sendProtocol(PROTOCOL_END);
+      return;
+    }
+
+    const dir = grid.getDirection(x, y, pocket.x, pocket.y);
+    await this.adapter.move(dir);
+
+    if (this.me.carried > 0) {
+      await this.adapter.putdown();
+      this.me.carried = 0;
+      this.me.carriedReward = 0;
+      // Step back to give space
+      const inverse = INVERSE_DIR[dir];
+      if (inverse) {
+        await this.adapter.move(inverse);
+      }
+      await this._sendProtocol(PROTOCOL_ACQUIRE);
+    } else {
+      this._resetCoordination();
+      await this._sendProtocol(PROTOCOL_END);
+    }
+  }
+
+  _adjacentAccessible(x, y) {
+    const cells = [
+      { x: x + 1, y },
+      { x: x - 1, y },
+      { x, y: y + 1 },
+      { x, y: y - 1 }
+    ];
+    return cells.filter(c => grid.isAccessible(c.x, c.y));
+  }
+
+  _isOccupiedByAgent(x, y) {
+    const agents = this.belief.getAgentsArray ? this.belief.getAgentsArray() : [];
+    return agents.some(a => Math.round(a.x) === Math.round(x) && Math.round(a.y) === Math.round(y));
+  }
+
+  _findPocket(x, y) {
+    return this._adjacentAccessible(x, y).find(c => !this._isOccupiedByAgent(c.x, c.y));
+  }
+
+  _findPocketTowardsFriend(x, y, friend) {
+    const fx = Math.round(friend.x);
+    const fy = Math.round(friend.y);
+    const currentDist = grid.manhattanDistance(x, y, fx, fy);
+    return this._adjacentAccessible(x, y).find(c => !this._isOccupiedByAgent(c.x, c.y) && grid.manhattanDistance(c.x, c.y, fx, fy) < currentDist);
+  }
+
+  _findAdjacentParcelCell(x, y) {
+    const parcels = this.belief.getParcelsArray ? this.belief.getParcelsArray() : [];
+    const adjacent = this._adjacentAccessible(x, y);
+    return adjacent.find(cell => parcels.some(p => Math.round(p.x) === cell.x && Math.round(p.y) === cell.y && !p.carriedBy) && !this._isOccupiedByAgent(cell.x, cell.y));
+  }
+
+  _myPosition() {
+    return { x: Math.round(this.me.x), y: Math.round(this.me.y) };
+  }
+
+  _friendAgent() {
+    if (!this.friendId || !this.belief.getAgent) return null;
+    return this.belief.getAgent(this.friendId);
+  }
+
+  _resetCoordination() {
+    this._protocolActive = false;
+    (this.me.setCoordinationState || this.me.setHandoffState).call(this.me, false);
+  }
+
+  async _sendProtocol(phase) {
+    if (!this.isReady()) return;
+    const msg = Msg.handoff(phase, null);
     await this.adapter.say(this.friendId, msg);
-    commLogger.info('HANDOFF ' + phase + ' sent');
+    commLogger.info('[PROTOCOL] Sent ' + phase + ' to ' + this.friendId);
+  }
+
+  /**
+   * Compatibility shim for legacy callers
+   */
+  async sendHandoff(phase) {
+    if (!this.isReady()) return;
+    if (phase === 'START') return this._sendProtocol(PROTOCOL_YIELD);
+    if (phase === 'DROPPED') return this._sendProtocol(PROTOCOL_RELEASE);
+    if (phase === 'RETREATED') return this._sendProtocol(PROTOCOL_RELEASE);
+    if (phase === 'DONE') return this._sendProtocol(PROTOCOL_END);
+    if (phase === 'ACK_START') return; // no-op in new protocol
+    return this._sendProtocol(phase);
   }
 
   /**

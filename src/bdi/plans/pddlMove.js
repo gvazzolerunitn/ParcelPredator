@@ -12,6 +12,7 @@ import { fastLocalSolver, onlineSolverFallback, getLastCacheHit } from "../../PD
 import config from "../../config/default.js";
 import { agentLogger } from '../../utils/logger.js';
 import { runLogger } from '../../utils/runLogger.js';
+import { ConflictDetectedError } from "../errors.js";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import path from "path";
@@ -20,6 +21,12 @@ import path from "path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const DOMAIN_PATH = path.join(__dirname, "../../PDDL/domain.pddl");
+const DIR_TO_DELTA = {
+  up: { dx: 0, dy: 1 },
+  down: { dx: 0, dy: -1 },
+  left: { dx: -1, dy: 0 },
+  right: { dx: 1, dy: 0 }
+};
 
 // Load domain.pddl once at module initialization
 let DOMAIN_CONTENT = null;
@@ -55,6 +62,8 @@ class PDDLMove {
     const ty = Math.round(y);
     const sx = Math.round(this.parent.x);
     const sy = Math.round(this.parent.y);
+    let curX = sx;
+    let curY = sy;
 
     // Already at destination
     if (sx === tx && sy === ty) return true;
@@ -150,12 +159,20 @@ class PDDLMove {
       if (typeof action === "string") {
         action = action.toLowerCase().replace('move-', '').replace('move_', '');
       }
+      const next = this._nextCell(curX, curY, action);
 
       const moveOk = await adapter.move(action);
       if (!moveOk) {
+        if (this._isFriendBlocking(next, belief)) {
+          await this._triggerCoordination(next);
+          throw new ConflictDetectedError("blocked by friend");
+        }
         agentLogger.hot('moveObstructed', 5000, 'PDDLMove: Move failed, path obstructed');
         return "obstructed";
       }
+
+      curX = next.x;
+      curY = next.y;
     }
 
     // Verify we reached destination
@@ -166,6 +183,25 @@ class PDDLMove {
     }
 
     return "obstructed";
+  }
+
+  _nextCell(x, y, dir) {
+    const delta = DIR_TO_DELTA[dir];
+    if (!delta) return { x, y };
+    return { x: x + delta.dx, y: y + delta.dy };
+  }
+
+  _isFriendBlocking(next, belief) {
+    if (!belief || !this.parent.friendId || !belief.getAgent) return false;
+    const friend = belief.getAgent(this.parent.friendId);
+    if (!friend) return false;
+    return Math.round(friend.x) === Math.round(next.x) && Math.round(friend.y) === Math.round(next.y);
+  }
+
+  async _triggerCoordination(blockedCell) {
+    if (this.parent.comm && this.parent.comm.beginCoordinationProtocol) {
+      await this.parent.comm.beginCoordinationProtocol({ blockedCell });
+    }
   }
 }
 
