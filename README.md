@@ -38,6 +38,7 @@ Then start the server:
 ```bash
 cd Deliveroo.js
 npm install
+cd backend
 npm start
 ```
 
