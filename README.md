@@ -1,6 +1,20 @@
-# ParcelPredator
+# ParcelPredator 🦁
 
-ParcelPredator is a BDI-style autonomous agent (single or dual) for the Deliveroo.js simulator. The goal is to reliably pick up and deliver parcels in a dynamic grid world (moving agents, spawners, time-decaying rewards), using fast local planning plus coordination to reduce contention.
+**Advanced BDI Multi-Agent for Dynamic Parcel Delivery**  
+*Autonomous Software Agents - University of Trento, 2025-2026*
+
+[![Node.js](https://img.shields.io/badge/Node.js-1B5E20?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![JavaScript](https://img.shields.io/badge/JavaScript-1565C0?style=flat-square&logo=javascript&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
+[![BDI Agent](https://img.shields.io/badge/BDI%20Agent-283593?style=flat-square&logoColor=white)](https://en.wikipedia.org/wiki/Belief%E2%80%93desire%E2%80%93intention_software_model)
+[![Deliveroo.js](https://img.shields.io/badge/Deliveroo.js-6A1B9A?style=flat-square&logoColor=white)](https://deliveroo.js-simulator.com/)
+[![DeliverooAgent.js](https://img.shields.io/badge/DeliverooAgent.js-AD1457?style=flat-square&logoColor=white)](https://deliveroo.js-simulator.com/)
+
+> **Author:** G. Vazzoler  
+> **Course:** Autonomous Software Agents  
+> **Institution:** University of Trento  
+> **Academic Year:** 2025-2026
+
+ParcelPredator deploys intelligent BDI-style agents (single or dual-mode) in the Deliveroo.js grid world, built on top of the DeliverooAgent.js client template, to handle dynamic challenges like moving rivals, parcel spawners, and time-decaying rewards through rapid local planning and smart coordination to dominate deliveries.​
 
 ## What you get
 
