@@ -43,7 +43,11 @@ npm start
 ```
 
 ### 2) Get one (or two) tokens
-Open the Deliveroo UI and log in. Tokens are stored by the frontend in the browser (Local Storage key `myTokens`) and can be copied from there.
+Open the Deliveroo UI and log in to generate tokens, or use the tokens already stored locally in the repository.
+
+Tokens: generate or reuse
+- Generate via UI: open the Deliveroo web UI, log in, then copy tokens from the browser's Local Storage (`myTokens`). In Chrome/Edge: DevTools → Application → Local Storage → select site → `myTokens` entry. Tokens are plain JWT strings you can paste into `src/config/default.js`.
+- Reuse from `default.js`: for quick local testing you can keep the tokens already present in `src/config/default.js` (the repo includes `token` and `token2`).
 
 ### 3) Configure ParcelPredator
 Edit `src/config/default.js`:
