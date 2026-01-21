@@ -163,7 +163,7 @@ The system is organized into the following high-level modules, orchestrating the
     \item \textbf{Communication (`src/bdi/comm.js`):} Handles multi-agent interactions, including the initial handshake, intention sharing (claims), and the handoff protocol for conflict resolution.
 \end{itemize}
 
-The \texttt{launcher.js} file serves as the entry point, initializing these components and wiring the server events (sensing) to the belief revision functions.
+\noindent The \texttt{launcher.js} file serves as the entry point, initializing these components and wiring the server events (sensing) to the belief revision functions.
 
 \subsection{Belief Model}
 The agent maintains a dynamic representation of the world, updated in real-time via event callbacks from the adapter (\texttt{onParcels}, \texttt{onAgents}, \texttt{onMap}). The belief model is implemented in the \texttt{Belief} class and manages the following data structures:
@@ -205,7 +205,7 @@ The selection of the best parcel to pick up is governed by a utility function th
     Score(p) = (R_{p} + R_{carried} - Cost_{move}) \times Penalty_{contention}
 \end{equation}
 
-Where:
+\noindent Where:
 \begin{itemize}
     \item $R_{p}$ is the current reward of the parcel.
     \item $R_{carried}$ is the total reward of parcels already in the inventory (incentivizing the completion of efficient multi-parcel routes).
@@ -359,7 +359,7 @@ The \texttt{Comm} module implements a Promise-based request wrapper for the FIPA
 \section{Experiments and Results}
 To evaluate the performance of the \textit{ParcelPredator} agents, a comprehensive experimental campaign was conducted using the validation scenarios provided by the course. The experiments focused on two key metrics: the final \textbf{score} (effectiveness) and the \textbf{computational latency} (efficiency).
 
-Data collection was automated using the custom \texttt{RunLogger} module, which recorded score progression, solver duration, and event processing times for every run.
+\noindent Data collection was automated using the custom \texttt{RunLogger} module, which recorded score progression, solver duration, and event processing times for every run.
 
 \subsection{Experimental Setup}
 The tests were executed on a local instance of the \textit{Deliveroo.js} server to minimize network jitter. The experimental conditions were standardized as follows:
@@ -368,7 +368,7 @@ The tests were executed on a local instance of the \textit{Deliveroo.js} server 
     \item \textbf{Adversarial Environment:} To simulate a crowded and competitive environment, \textbf{6 random moving agents} were injected into the simulation for all scenarios (with the exception of the \texttt{hallway} scenario, where strict 1v1 coordination was required).
 \end{itemize}
 
-Two distinct agent configurations were tested:
+\noindent Two distinct agent configurations were tested:
 \begin{itemize}
     \item \textbf{Single Agent Mode:} Maps \texttt{25c1\_1} to \texttt{25c1\_9}, comparing the reactive BFS strategy against the PDDL-based planner.
     \item \textbf{Dual Agent Mode:} Maps \texttt{25c2\_1} to \texttt{25c2\_7} plus the \texttt{25c2\_hallway}, testing the team coordination protocols.
@@ -407,7 +407,7 @@ Table \ref{tab:single_scores} presents the scores achieved in the single-agent s
     \end{tabular}
 \end{table}
 
-The results demonstrate the superiority of the PDDL planner in complex environments. In map \texttt{25c1\_9}, which features a maze-like structure, the PDDL agent scored \textbf{41\% higher} than the BFS agent (3708 vs 2626). This confirms that look-ahead planning allows the agent to navigate static obstacles more efficiently than a greedy reactive approach. Conversely, in simpler or more open maps (e.g., \texttt{25c1\_2}), the BFS strategy remains competitive as the lack of complex traps makes deep planning less critical.
+\noindent The results demonstrate the superiority of the PDDL planner in complex environments. In map \texttt{25c1\_9}, which features a maze-like structure, the PDDL agent scored \textbf{41\% higher} than the BFS agent (3708 vs 2626). This confirms that look-ahead planning allows the agent to navigate static obstacles more efficiently than a greedy reactive approach. Conversely, in simpler or more open maps (e.g., \texttt{25c1\_2}), the BFS strategy remains competitive as the lack of complex traps makes deep planning less critical.
 
 \subsection{Multi-Agent Performance}
 In the dual-agent scenarios, the focus shifted to coordination. Table \ref{tab:dual_scores} details the contributions of each agent ($A_1$ and $A_2$) to the team's total score.
@@ -464,10 +464,10 @@ Real-time responsiveness is crucial in \textit{Deliveroo.js}. The following figu
 Comparing the reactive BFS approach with the deliberative A* (via PDDL) reveals a clear distinction between the \textit{cognitive cost} and the overall \textit{control loop latency}.
 While BFS reacts locally without explicit planning, the PDDL planner generates full plans on demand. However, as shown in Figure \ref{fig:lat_solver_cost}, the cognitive cost of the local solver is consistently in the order of milliseconds (typically $< 3$ ms).
 
-Crucially, Figure \ref{fig:lat_single} shows that this cognitive overhead does not propagate to the overall loop latency. The average cycle time remains comparable between BFS and PDDL configurations (mostly in the \textbf{50--120 ms} range).
+\noindent Crucially, Figure \ref{fig:lat_single} shows that this cognitive overhead does not propagate to the overall loop latency. The average cycle time remains comparable between BFS and PDDL configurations (mostly in the \textbf{50--120 ms} range).
 This behavior indicates that the cost of the solver is fully amortized within the control loop, which is dominated by non-deliberative factors such as network I/O, server update frequency (\texttt{MOVEMENT\_DURATION}), and perception updates.
 
-In conclusion, the integration of A* via the local PDDL solver adds deliberative capabilities at a low computational cost. This improves the quality of action selection (as seen in the score tables) without compromising the system's responsiveness. The architecture successfully balances the trade-off: BFS privileges raw speed but risks myopia, while our PDDL implementation produces globally informed paths with a predictable and non-dominant overhead.
+\noindent In conclusion, the integration of A* via the local PDDL solver adds deliberative capabilities at a low computational cost. This improves the quality of action selection (as seen in the score tables) without compromising the system's responsiveness. The architecture successfully balances the trade-off: BFS privileges raw speed but risks myopia, while our PDDL implementation produces globally informed paths with a predictable and non-dominant overhead.
 
 % --- Chapter 8 ---
 \section{Discussion and Conclusion}
@@ -492,7 +492,7 @@ While the system performs robustly, we identify two key areas for future improve
     \item \textbf{Adversarial Modeling:} The current agent treats opponent agents as dynamic obstacles to be avoided. Integrating an adversarial prediction model (e.g., estimating an opponent's likely target based on their trajectory) could allow for more aggressive strategies, such as stealing parcels before an opponent arrives or blocking their path in competitive modes.
 \end{enumerate}
 
-In conclusion, \textit{ParcelPredator} successfully demonstrates that a BDI agent, when supported by optimized engineering solutions like local solving and caching, can exhibit complex, intelligent behavior in real-time environments, effectively balancing individual optimality with team cooperation.
+\noindent In conclusion, \textit{ParcelPredator} successfully demonstrates that a BDI agent, when supported by optimized engineering solutions like local solving and caching, can exhibit complex, intelligent behavior in real-time environments, effectively balancing individual optimality with team cooperation.
 
 % --- Bibliography ---
 \begin{thebibliography}{9}
