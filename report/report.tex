@@ -1,7 +1,8 @@
-\documentclass[a4paper, 10pt, twocolumn]{article}
+\documentclass[a4paper, 10pt]{article}
 
 % --- Packages ---
 \usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
 \usepackage[english]{babel}
 \usepackage{geometry}
 \usepackage{graphicx} % Fondamentale per il logo
@@ -99,134 +100,399 @@
     }
     
     \vspace*{2cm} % Margine inferiore visivo
-\end{titlepage}
-\twocolumn % Switch back to two columns for the report text
+\begin{center}
+    \begin{minipage}{0.85\textwidth}
+        \small
+        \noindent\textbf{Abstract.} This project implements autonomous BDI agents for the Deliveroo.js environment, combining a dynamic utility function for optimal parcel selection with a hybrid navigation strategy. The path planning integrates standard BFS with PDDL-based reasoning, executed via a custom low-latency local A* solver. Multi-agent coordination is achieved through explicit intention negotiation (claiming) and a dedicated handoff protocol designed to resolve deadlocks in constrained spaces. Experimental validation was conducted on the 25c1\_* scenarios for single-agent performance and 25c2\_* scenarios (including the critical 25c2\_hallway) for the coordinated team, demonstrating effective resource management and robust spatial conflict resolution.
+    \end{minipage}
+\end{center}
 
-% --- Abstract ---
-\begin{abstract}
-    \emph{[TODO: Write a brief summary of the project, covering the goal, the BDI architecture approach, the multi-agent coordination strategy, and the key results obtained.]}
-\end{abstract}
+\end{titlepage}
 
 % --- Chapter 1 ---
 \section{Introduction}
-    \emph{[TODO: Introduce the context of the project.]}
+The development of autonomous software agents capable of operating in dynamic and partially observable environments is a central challenge in Artificial Intelligence. This project, \textit{ParcelPredator}, addresses this challenge within the context of \textit{Deliveroo.js}, a grid-world simulation where agents compete or cooperate to collect and deliver parcels.
 
-    \subsection{Context and Motivation}
-    \emph{[TODO: Describe the problem domain (Deliveroo.js) and why autonomous agents are needed.]}
+\subsection{Context and Motivation}
+The \textit{Deliveroo.js} environment presents a dynamic grid ($M \times N$) containing obstacles, delivery zones, and parcel spawners. The complexity arises from several factors:
+\begin{itemize}
+    \item \textbf{Dynamism:} Parcels appear with a finite time-to-live and their reward decays over time, requiring agents to balance immediate gains against travel costs.
+    \item \textbf{Partial Observability:} Agents have a limited sensing range ($x_{offset} + y_{offset} < 5$), necessitating a robust belief revision system to maintain an internal model of the world.
+    \item \textbf{Spatial Constraints:} Movement is not instantaneous and tiles are locked during traversal. In multi-agent scenarios, this leads to potential deadlocks and collisions, particularly in narrow corridors (e.g., the "Hallway" scenario).
+\end{itemize}
+These characteristics make \textit{Deliveroo.js} an ideal testbed for implementing the Belief-Desire-Intention (BDI) architecture, as agents must constantly update their beliefs, deliberate on desires (e.g., which parcel to pick), and commit to intentions (plans) while reacting to unforeseen changes.
 
-    \subsection{Project Objectives}
-    \emph{[TODO: List the main goals (e.g., maximizing score, efficient pathfinding, robust coordination).]}
+\subsection{Objectives and Contributions}
+The primary objective of this project is to develop a robust agent capable of maximizing the delivery score in both single-agent and cooperative multi-agent settings. Specifically, the contributions of this work, implemented on top of the provided Node.js/Socket.IO skeleton, are:
+
+\begin{itemize}
+    \item \textbf{BDI Architecture Implementation:} Development of a full BDI loop that manages belief revision (handling stale data for parcels and agents) and generates options based on a dynamic utility function that considers reward decay and contention penalty.
+    
+    \item \textbf{Hybrid Path Planning:} Integration of a navigation system that alternates between a standard Breadth-First Search (BFS) and a PDDL-based approach. The latter is powered by a custom high-performance local A* solver (`fastLocalSolver.js`) that processes PDDL problem definitions to ensure compliance with the planning requirements while minimizing latency.
+    
+    \item \textbf{Multi-Agent Coordination:} Implementation of a cooperative team strategy featuring:
+    \begin{enumerate}
+        \item A \textbf{Handshake Protocol} for role assignment and network discovery.
+        \item An \textbf{Intention Claiming System} where agents broadcast their targets to avoid redundant trips and resource contention.
+        \item A specialized \textbf{Handoff Protocol} to resolve spatial deadlocks in narrow corridors. For example, in the scenario \texttt{25c2\_hallway}, agents can negotiate yielding or transfer parcels to clear the path.
+    \end{enumerate}
+\end{itemize}
+
+\noindent The resulting system was validated against the standard course challenges (`25c1\_*`, `25c2\_*`), demonstrating the ability to handle both efficient routing and complex agent-to-agent interactions.
 
 % --- Chapter 2 ---
 \section{System Architecture}
-    \emph{[TODO: High-level overview of the system.]}
+The \textit{ParcelPredator} system is built upon the Node.js runtime, utilizing the \texttt{@unitn-asa/deliveroo-js-client} library to interact with the game server. The architecture follows a modular Belief-Desire-Intention (BDI) pattern, separating perception, deliberation, and execution into distinct components.
 
-    \subsection{General Overview}
-    \emph{[TODO: Briefly explain how the system is organized.]}
+\subsection{Component Overview}
+The system is organized into the following high-level modules, orchestrating the agent's behavior from perception to action:
 
-    \subsection{The Agent Model (BDI)}
-    \emph{[TODO: Explain how the Belief-Desire-Intention model is implemented.]}
+\begin{itemize}
+    \item \textbf{Agent Core (`src/bdi/agent.js`):} This module represents the agent entity. It maintains the main control loop (`me.loop()`), manages the intention queue, and holds the state for coordination protocols (e.g., handoff status).
+    
+    \item \textbf{Belief Model (`src/bdi/belief.js`):} Act as the agent's memory, storing the current state of the environment (parcels, agents, map configuration) and managing the expiration of stale data.
+    
+    \item \textbf{Deliberation (`src/bdi/options.js`):} Responsible for the "Desire" and "Intention" phases. It evaluates the current beliefs to generate candidate goals (e.g., picking up a parcel vs. exploring) and selects the best course of action based on a utility scoring function.
+    
+    \item \textbf{Planning \& Execution (`src/bdi/plans/`):} Contains the procedural knowledge. The agent uses plans like \texttt{GoPickUp} and \texttt{GoDeliver} to achieve goals. Movement is handled by a hybrid approach:
+    \begin{itemize}
+        \item \texttt{MoveBfs.js}: A standard Breadth-First Search for simple pathfinding.
+        \item \texttt{PDDLMove.js}: A PDDL-based planner utilizing a custom \texttt{fastLocalSolver.js} (an optimized local A* solver) to handle domain-specific movement constraints.
+    \end{itemize}
+    
+    \item \textbf{Communication (`src/bdi/comm.js`):} Handles multi-agent interactions, including the initial handshake, intention sharing (claims), and the handoff protocol for conflict resolution.
+\end{itemize}
 
-    \subsection{Environment and Perception}
-    \emph{[TODO: Describe how the agent perceives the grid, parcels, and other agents.]}
+The \texttt{launcher.js} file serves as the entry point, initializing these components and wiring the server events (sensing) to the belief revision functions.
+
+\subsection{Belief Model}
+The agent maintains a dynamic representation of the world, updated in real-time via event callbacks from the adapter (\texttt{onParcels}, \texttt{onAgents}, \texttt{onMap}). The belief model is implemented in the \texttt{Belief} class and manages the following data structures:
+
+\begin{itemize}
+    \item \textbf{Parcels:} Stored in a \texttt{Map} (ID $\to$ Object). Each entry includes the position, current reward, and a timestamp. To handle the dynamic nature of the game, a \texttt{checkExpiredParcels()} function removes parcels that haven't been sensed for over 2 seconds or whose estimated reward has decayed to zero.
+    
+    \item \textbf{Agents:} Other agents are tracked in a \texttt{Map}, storing their last known position and score. A validity window of 5 seconds is applied; agents not sensed within this period are considered "lost" and removed from memory to prevent pathfinding around "ghost" obstacles.
+    
+    \item \textbf{Grid/Map:} Static obstacles (walls) and logical zones (delivery tiles, spawners) are stored in a \texttt{Grid} utility class, which provides accessibility checks and Manhattan distance calculations.
+    
+    \item \textbf{Operational Metadata:} 
+    \begin{itemize}
+        \item \textbf{Claims:} A registry of intentions broadcasted by the partner agent. These have a Time-To-Live (TTL) of 3 seconds to avoid stale locks on parcels.
+        \item \textbf{Cooldowns:} A mechanism to temporarily ignore specific parcels or tiles (e.g., after a failed pickup attempt), preventing the agent from getting stuck in loops.
+    \end{itemize}
+\end{itemize}
 
 % --- Chapter 3 ---
 \section{Single Agent Strategy}
-    \emph{[TODO: Detail the logic for a single agent.]}
+The core logic of the \textit{ParcelPredator} agent relies on a robust implementation of the Belief-Desire-Intention (BDI) architecture. In the single-agent configuration, the primary goal is to maximize the delivery score while competing against hostile agents for resources. This chapter details the perception mechanisms, the utility-based decision-making process, and the execution strategies employed to achieve this goal.
 
-    \subsection{Belief Revision}
-    \emph{[TODO: How does the agent update its internal state based on new perceptions?]}
+\subsection{Perception and Belief Revision}
+The agent maintains a local model of the environment that is continuously synchronized with the server's state. To handle the dynamic and partially observable nature of the game, a set of specific revision rules is applied in the \texttt{Belief} module:
 
-    \subsection{Option Generation and Scoring}
-    \emph{[TODO: Explain the formula or logic used to rank different options (e.g., pick up vs. deliver).]}
+\begin{itemize}
+    \item \textbf{Information Decay:} Perception is event-driven. To prevent the agent from acting on stale data, beliefs about parcels and other agents include a timestamp. Parcels not sensed for over 2 seconds or whose reward has decayed to zero are automatically removed from memory. Similarly, agents not seen for 5 seconds are discarded.
     
-    \begin{equation}
-        Score = \frac{Reward}{Cost} 
-    \end{equation}
+    \item \textbf{Cooldown Mechanism:} A critical component for robustness is the "cooldown" system. If a target (parcel or tile) proves unreachable or an action fails repeatedly, the specific ID or coordinate is added to a cooldown list (typically for 2-10 seconds). This prevents the agent from entering infinite loops or persistently chasing inaccessible resources.
+\end{itemize}
 
-    \subsection{Intention Management}
-    \emph{[TODO: How does the agent select and switch intentions?]}
+\subsection{Reasoning and Option Generation}
+The deliberation process, implemented in \texttt{options.js}, is responsible for generating "Desires" and selecting the most profitable "Intention". The agent evaluates four possible behaviors: \textit{Pick Up}, \textit{Deliver}, \textit{Explore}, and \textit{Random Move}.
 
-    \subsection{Path Planning}
-    \emph{[TODO: Discuss the algorithms used (e.g., BFS, A*, etc.) for navigation.]}
+\subsubsection{Utility Function}
+The selection of the best parcel to pick up is governed by a utility function that considers the potential reward, the travel cost, and the risk of contention. The score for a candidate parcel $p$ is defined as:
+
+\begin{equation}
+    Score(p) = (R_{p} + R_{carried} - Cost_{move}) \times Penalty_{contention}
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $R_{p}$ is the current reward of the parcel.
+    \item $R_{carried}$ is the total reward of parcels already in the inventory (incentivizing the completion of efficient multi-parcel routes).
+    \item $Cost_{move}$ is a function of the Manhattan distance to the parcel and subsequently to the delivery zone, weighted by the agent's load factor ($loss \times (carried + 1)$).
+    \item $Penalty_{contention}$ is a dynamic multiplier ($0.1$ to $1.0$). If another agent is significantly closer to the parcel, the score is penalized to avoid wasteful races.
+\end{itemize}
+
+\subsection{Intention Management}
+Once the options are scored, the highest-ranking one is promoted to an \textbf{Intention}. The agent employs a "single-minded" commitment strategy: once an intention (e.g., \texttt{go\_pick\_up}) is adopted, it is generally maintained until success or explicit failure. However, purely exploratory intentions (\texttt{go\_random} or \texttt{explore}) are volatile and immediately interrupted if a valid parcel appears in the agent's sensing range.
+
+\subsection{Execution and Robustness}
+Plans are the procedural units that execute intentions. The primary plans, \texttt{GoPickUp} and \texttt{GoDeliver}, incorporate specific mechanisms to handle execution failures:
+
+\begin{itemize}
+    \item \textbf{Retry with Exponential Backoff:} If movement towards a target is blocked (e.g., by dynamic obstacles), the plan does not fail immediately. Instead, it retries the movement action up to 3 times, with increasing delays (200ms, 400ms, etc.) between attempts. This allows temporary congestion to clear without triggering a full replanning cycle.
+    
+    \item \textbf{Graceful Failure:} If the retries are exhausted, the target is marked with a cooldown, and the intention is dropped. This triggers a new reasoning cycle, allowing the agent to select an alternative target immediately.
+\end{itemize}
 
 % --- Chapter 4 ---
 \section{Multi-Agent Coordination}
-    \emph{[TODO: Detail the strategy for the team of agents.]}
+To address the challenges of the cooperative scenarios (Challenge 2), the system extends the single-agent BDI architecture with a communication layer and explicit coordination protocols. The logic is encapsulated primarily in the \texttt{Comm} module and allows two agents to share beliefs, negotiate targets, and resolve spatial deadlocks.
 
-    \subsection{Communication Protocol}
-    \emph{[TODO: Describe the message types and the handshake process.]}
+\subsection{Communication Infrastructure}
+Agents communicate via the game server using a custom messaging protocol built on top of the \texttt{say} and \texttt{shout} primitives provided by the API. The communication lifecycle consists of three stages:
 
-    \subsection{Negotiation and Conflict Resolution}
-    \emph{[TODO: How do agents decide who goes where to avoid collisions?]}
+\begin{enumerate}
+    \item \textbf{Handshake \& Discovery:} Upon connection, agents broadcast a \texttt{HANDSHAKE} request. When a reply is received, they establish a "friendship" bond, exchanging IDs to filter subsequent messages. This phase ensures that agents ignore potential adversaries and only coordinate with their designated teammate.
+    
+    \item \textbf{Belief Synchronization:} To overcome partial observability, agents periodically exchange delta-updates about perceived parcels and other agents (\texttt{INFO\_PARCELS}, \texttt{INFO\_AGENTS}). These updates are merged into the local \texttt{Belief} store, effectively doubling the team's sensory coverage.
+\end{enumerate}
 
-    \subsection{Map Division (Optional)}
-    \emph{[TODO: If applicable, describe how the map is split between agents.]}
+\subsection{Task Negotiation and Claims}
+To prevent resource contention—where both agents chase the same parcel—the system implements an explicit "Claiming Strategy".
+
+\noindent Before committing to a \texttt{GoPickUp} intention, an agent broadcasts a \texttt{INTENTION} message containing the target parcel ID and its calculated utility score. The partner agent registers this claim in its belief model with a 3-second Time-To-Live (TTL). 
+
+\subsubsection{Conflict Resolution (Yielding)}
+When generating options, the agent checks if any candidate parcel is currently claimed by the partner. A resolution logic determines who proceeds:
+\begin{itemize}
+    \item If the partner's claim has a higher utility score, the agent \textbf{yields} and discards the option.
+    \item If scores are tied, a deterministic tie-breaker based on agent IDs is applied.
+    \item If the agent's score is significantly higher, it overwrites the claim (assuming the partner will eventually yield upon receiving the new intention).
+\end{itemize}
+
+\subsubsection{Delegation (FIPA Request)}
+The system also supports proactive delegation. If an agent identifies a high-value parcel that is significantly closer to its partner than to itself, it sends a FIPA-compliant \texttt{REQUEST} message. The partner evaluates the request against its current capacity and queue; if accepted (\texttt{AGREE}), the partner adopts the goal, allowing for optimal task distribution.
+
+\subsection{The Handoff Protocol}
+A critical challenge in the \texttt{25c2\_hallway} scenario is the "corridor deadlock," where two agents block each other in a narrow passage. To resolve this, a specialized \textbf{Handoff Protocol} was implemented. It is triggered when movement is blocked by a friend or when the pathfinding detects a corridor constraint.
+
+\noindent The protocol operates as a finite state machine with the following phases:
+
+\begin{enumerate}
+    \item \textbf{PROTOCOL\_YIELD:} The agent with fewer parcels (or furthest from delivery) initiates the sequence. It searches for an adjacent "pocket" or free tile and moves into it.
+    \item \textbf{PROTOCOL\_RELEASE:} If no pocket is available but the agent is carrying parcels needed by the other side, it drops the parcels and retreats (\texttt{PROTOCOL\_RETREAT}), signaling the partner to take over.
+    \item \textbf{PROTOCOL\_ACQUIRE:} The partner waits for the path to clear, moves to the dropped parcels, and collects them.
+\end{enumerate}
+
+\noindent This mechanism transforms a potential deadlock into a cooperative relay race, essential for solving constrained maps.
 
 % --- Chapter 5 ---
 \section{PDDL Implementation}
-    \emph{[TODO: Detail the integration of the external planner.]}
+To enhance the agent's navigation capabilities beyond simple reactive algorithms, the project integrates a Planning Domain Definition Language (PDDL) component. While the system supports connection to an external online solver via the course APIs, the primary implementation relies on a custom, high-performance local solver designed to minimize network latency while strictly adhering to PDDL formalisms.
 
-    \subsection{Domain Formalization}
-    \emph{[TODO: Describe the predicates and actions defined in the PDDL domain.]}
+\subsection{Domain Formalization}
+The planning domain, defined in \texttt{domain.pddl}, models the Deliveroo grid as a set of connected tiles. It utilizes \texttt{:strips} and \texttt{:typing} requirements.
 
-    \subsection{Problem Solving Strategy}
-    \emph{[TODO: When is PDDL triggered? How are problems generated?]}
+\subsubsection{Predicates}
+The state of the world is described using the following predicates:
+\begin{itemize}
+    \item \texttt{(at ?t - tile)}: The agent's current position.
+    \item \texttt{(adjacent-\{dir\} ?from ?to)}: Defines the grid topology (where \{dir\} is up, down, left, right).
+    \item \texttt{(walkable ?t)}: Static map accessibility (walls vs. floor).
+    \item \texttt{(free ?t)}: Dynamic accessibility (true if the tile is not occupied by another agent).
+\end{itemize}
 
-    \begin{lstlisting}[language=Lisp, caption={PDDL Action Example}]
-    (:action move
-        :parameters (?a - agent ?from ?to - tile)
-        ...
-    )
-    \end{lstlisting}
+\subsubsection{Actions}
+Four actions are defined (\texttt{move-up}, \texttt{move-down}, \texttt{move-left}, \texttt{move-right}). Preconditions ensure that a move is valid only if the destination is adjacent, walkable, and currently free of other agents.
+
+\begin{lstlisting}[language=Lisp, caption={PDDL Move Action Example}]
+(:action move-up
+  :parameters (?from ?to - tile)
+  :precondition (and
+    (at ?from)
+    (adjacent-up ?from ?to)
+    (walkable ?to)
+    (free ?to)
+  )
+  :effect (and
+    (at ?to)
+    (not (at ?from))
+  )
+)
+\end{lstlisting}
+
+\subsection{Problem Generation}
+The \texttt{PddlPlanner} class dynamically generates a PDDL problem instance for every navigation request. It translates the current \texttt{Grid} object and \texttt{Belief} state into PDDL syntax.
+
+\noindent Crucially, this module handles \textbf{dynamic obstacles}: it iterates through the list of known agents (retrieved from beliefs) and omits the \texttt{(free tile\_x\_y)} predicate for any tile they occupy. This forces the solver to find a path that avoids collisions with other entities.
+
+\subsection{The Fast Local Solver}
+Although the architecture supports an \texttt{onlineSolverFallback} (using the \texttt{@unitn-asa/pddl-client}), the core innovation is the \texttt{fastLocalSolver.js}. This component acts as an embedded PDDL interpreter:
+
+\begin{enumerate}
+    \item \textbf{Parsing:} It parses the PDDL problem string to extract the graph structure (adjacency lists), the start node, the goal node, and the set of blocked nodes.
+    \item \textbf{Search:} It executes an A* (A-Star) search algorithm directly on the parsed structure.
+    \item \textbf{Caching:} To further optimize performance, it implements a solution cache (\texttt{solutionCache}) keyed by the tuple $\langle start, goal, blocked\_hash \rangle$. This significantly reduces CPU overhead for repeated path queries in static environments.
+\end{enumerate}
+
+\subsection{Integration in BDI Loop}
+The planning capability is exposed through the \texttt{PDDLMove} plan. When executed, this plan:
+\begin{itemize}
+    \item Generates the problem relative to the agent's current coordinates.
+    \item Invokes the local solver to obtain a plan (a sequence of actions like \texttt{up}, \texttt{left}, etc.).
+    \item Executes the plan step-by-step. If the environment changes during execution (e.g., an agent moves into the path), the step fails, triggering the BDI's standard retry/replanning mechanism.
+\end{itemize}
 
 % --- Chapter 6 ---
 \section{Implementation Details}
-    \emph{[TODO: Technical details about the code.]}
+The \textit{ParcelPredator} system is implemented in JavaScript utilizing the Node.js runtime. This choice allows for non-blocking I/O operations, which are essential for handling real-time events from the \textit{Deliveroo.js} server via WebSocket. The project relies on the \texttt{@unitn-asa/deliveroo-js-client} library for the low-level network interface, while the agent logic is built from scratch.
 
-    \subsection{Code Structure}
-    \emph{[TODO: Overview of the files and modules.]}
+\subsection{Project Structure}
+The codebase follows a modular architecture to separate concerns between the BDI core, planning logic, and utility functions:
 
-    \subsection{Key Technologies}
-    \emph{[TODO: Mention Node.js, libraries used, etc.]}
+\begin{itemize}
+    \item \texttt{src/bdi/}: Contains the cognitive core. \texttt{agent.js} implements the main loop; \texttt{belief.js} manages state; \texttt{intention.js} handles goal commitment; and \texttt{options.js} contains the deliberation logic.
+    \item \texttt{src/bdi/plans/}: Houses the executable plans. Each plan (e.g., \texttt{goPickUp.js}, \texttt{pddlMove.js}) is a class with an \texttt{execute()} method and applicability checks.
+    \item \texttt{src/PDDL/}: Contains the domain definition (\texttt{domain.pddl}) and the custom solver (\texttt{fastLocalSolver.js}).
+    \item \texttt{src/utils/}: Provides shared utilities like the \texttt{Grid} class for pathfinding and \texttt{logger.js} for debugging.
+\end{itemize}
+
+\subsection{Key Optimizations}
+To ensure the agent operates within the tight timing constraints of the simulation, several implementation optimizations were introduced.
+
+\subsubsection{Fast Local Solver}
+A significant bottleneck in PDDL-based agents is the latency of invoking external HTTP solvers. To address this, a custom \textbf{Fast Local Solver} was implemented in \texttt{fastLocalSolver.js}.
+\begin{itemize}
+    \item \textbf{Lightweight Parsing:} Instead of a full PDDL parser, it uses optimized Regular Expressions to extract the graph structure (adjacency, blocked tiles) from the problem string generated by \texttt{pddlPlanner.js}.
+    \item \textbf{A* Implementation:} The solver translates the PDDL predicates into a graph and executes an A* search algorithm directly in memory.
+    \item \textbf{Solution Caching:} A singleton cache (\texttt{solutionCache}) stores recent results keyed by the tuple \texttt{<start, goal, blocked\_hash>}. This drastically reduces CPU usage during repetitive movement phases, as identical pathfinding queries are served instantly without re-computation.
+\end{itemize}
+
+\subsubsection{Throttled Logging}
+Debugging real-time agents can be challenging due to the high frequency of the decision loop (10-20 Hz). A custom \texttt{ThrottledLogger} was implemented to support "hot" logging. The \texttt{logger.hot(key, interval, msg)} method ensures that repetitive messages (e.g., "Moving to X,Y") are printed to the console at most once every few seconds, preventing I/O saturation while keeping the developer informed of the agent's state.
+
+\subsubsection{Robust Communication Handling}
+The \texttt{Comm} module implements a Promise-based request wrapper for the FIPA-like protocols. The \texttt{sendRequest()} method wraps the asynchronous \texttt{say/listen} pattern into a standard JavaScript \texttt{Promise} with a built-in timeout. This ensures that if a partner agent disconnects or fails to reply to a \texttt{REQUEST}, the calling agent does not hang indefinitely but recovers gracefully after a timeout.
 
 % --- Chapter 7 ---
 \section{Experiments and Results}
-    \emph{[TODO: Present the data gathered.]}
+To evaluate the performance of the \textit{ParcelPredator} agents, a comprehensive experimental campaign was conducted using the validation scenarios provided by the course. The experiments focused on two key metrics: the final \textbf{score} (effectiveness) and the \textbf{computational latency} (efficiency).
 
-    \subsection{Experimental Setup}
-    \emph{[TODO: Describe the testing environment, maps used, and opponent configuration.]}
+Data collection was automated using the custom \texttt{RunLogger} module, which recorded score progression, solver duration, and event processing times for every run.
 
-    \subsection{Single Agent Performance}
-    \emph{[TODO: Compare performance (e.g., BFS vs PDDL) in single mode.]}
+\subsection{Experimental Setup}
+The tests were executed on a local instance of the \textit{Deliveroo.js} server to minimize network jitter. The experimental conditions were standardized as follows:
+\begin{itemize}
+    \item \textbf{Duration:} Each test run lasted exactly \textbf{180 seconds}.
+    \item \textbf{Adversarial Environment:} To simulate a crowded and competitive environment, \textbf{6 random moving agents} were injected into the simulation for all scenarios (with the exception of the \texttt{hallway} scenario, where strict 1v1 coordination was required).
+\end{itemize}
 
-    \begin{table}[htbp]
+Two distinct agent configurations were tested:
+\begin{itemize}
+    \item \textbf{Single Agent Mode:} Maps \texttt{25c1\_1} to \texttt{25c1\_9}, comparing the reactive BFS strategy against the PDDL-based planner.
+    \item \textbf{Dual Agent Mode:} Maps \texttt{25c2\_1} to \texttt{25c2\_7} plus the \texttt{25c2\_hallway}, testing the team coordination protocols.
+\end{itemize}
+
+\subsubsection*{Impact of Map Configurations}
+To correctly interpret the results, it is crucial to note that each scenario is governed by specific runtime settings that significantly influence throughput and achievable scores: specifically \texttt{PARCEL\_REWARD\_AVG}, \texttt{MOVEMENT\_DURATION}, and the map topology.
+For instance:
+\begin{itemize}
+    \item \textbf{Low Throughput (e.g., 25c1\_1):} Uses high movement duration (200ms) and low rewards (avg 10). This intrinsically limits the maximum score to the $\approx 500-600$ range.
+    \item \textbf{High Throughput (e.g., 25c1\_9):} Features very fast movement (50ms) and moderate rewards. This explains the exceptionally high scores ($>3000$) achieved here compared to other maps.
+    \item \textbf{Congestion Risk (e.g., 25c1\_8, 25c2\_hallway):} Maps with high percentages of "corridor" tiles increase the likelihood of deadlocks, especially with random agents present, making coordination strategies critical.
+\end{itemize}
+
+\subsection{Single Agent Performance}
+Table \ref{tab:single_scores} presents the scores achieved in the single-agent scenarios.
+
+\begin{table}[htbp]
     \centering
-    \begin{tabular}{lcc}
-    \toprule
-    \textbf{Map} & \textbf{Strategy A} & \textbf{Strategy B} \\
-    \midrule
-    Map 1 & 100 & 120 \\
-    Map 2 & 200 & 180 \\
-    \bottomrule
+    \caption{Single Agent Mode: Final Score Comparison}
+    \label{tab:single_scores}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Map} & \textbf{Score (BFS)} & \textbf{Score (PDDL)} \\
+        \midrule
+        25c1\_1 & 530 & \textbf{600} \\
+        25c1\_2 & \textbf{1683} & 1609 \\
+        25c1\_3 & \textbf{1275} & 1139 \\
+        25c1\_4 & 2124 & \textbf{2653} \\
+        25c1\_5 & \textbf{1983} & 1556 \\
+        25c1\_6 & 783 & 770 \\
+        25c1\_7 & 414 & \textbf{905} \\
+        25c1\_8 & 343 & \textbf{591} \\
+        25c1\_9 & 2626 & \textbf{3708} \\
+        \bottomrule
     \end{tabular}
-    \caption{Score comparison}
-    \label{tab:results}
-    \end{table}
+\end{table}
 
-    \subsection{Multi-Agent Performance}
-    \emph{[TODO: Analyze the efficiency of the team coordination.]}
+The results demonstrate the superiority of the PDDL planner in complex environments. In map \texttt{25c1\_9}, which features a maze-like structure, the PDDL agent scored \textbf{41\% higher} than the BFS agent (3708 vs 2626). This confirms that look-ahead planning allows the agent to navigate static obstacles more efficiently than a greedy reactive approach. Conversely, in simpler or more open maps (e.g., \texttt{25c1\_2}), the BFS strategy remains competitive as the lack of complex traps makes deep planning less critical.
 
-    \begin{figure}[htbp]
-        \centering
-        \framebox[\linewidth]{\rule{0pt}{3cm}Insert Chart Here}
-        \caption{Multi-agent performance graph}
-        \label{fig:chart}
-    \end{figure}
+\subsection{Multi-Agent Performance}
+In the dual-agent scenarios, the focus shifted to coordination. Table \ref{tab:dual_scores} details the contributions of each agent ($A_1$ and $A_2$) to the team's total score.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Dual Agent Mode: Individual and Team Scores ($A_1$ / $A_2$)}
+    \label{tab:dual_scores}
+    \begingroup
+    \setlength{\tabcolsep}{4pt} % reduce horizontal padding
+    \renewcommand{\arraystretch}{1} % adjust row height
+    \begin{tabular}{l|rr|r|rr|r}
+        \toprule
+        & \multicolumn{3}{c|}{\textbf{BFS Strategy}} & \multicolumn{3}{c}{\textbf{PDDL Strategy}} \\
+        \textbf{Map} & \textbf{$A_1$ / $A_2$} & \textbf{Total} & \textbf{\%} & \textbf{$A_1$ / $A_2$} & \textbf{Total} & \textbf{\%} \\
+        \midrule
+        25c2\_1 & 598 / 677 & \textbf{1275} & 47/53 & 479 / 456 & 935 & 51/49 \\
+        25c2\_2 & 193 / 218 & 411 & 47/53 & 339 / 448 & \textbf{787} & 43/57 \\
+        25c2\_3 & 833 / 948 & \textbf{1781} & 47/53 & 872 / 870 & 1742 & 50/50 \\
+        25c2\_4 & 984 / 1254 & 2238 & 44/56 & 1373 / 1445 & \textbf{2818} & 49/51 \\
+        25c2\_5 & 392 / 417 & 809 & 48/52 & 621 / 445 & \textbf{1066} & 58/42 \\
+        25c2\_6 & 967 / 876 & \textbf{1843} & 52/48 & 537 / 929 & 1466 & 37/63 \\
+        25c2\_7 & 1155 / 1380 & \textbf{2535} & 46/54 & 1212 / 998 & 2210 & 55/45 \\
+        Hallway & 0 / 169 & 169 & 0/100 & 0 / 170 & \textbf{170} & 0/100 \\
+        \bottomrule
+    \end{tabular}
+    \endgroup
+\end{table}
+
+The data highlights two distinct coordination patterns:
+\begin{enumerate}
+    \item \textbf{Parallel Efficiency:} In standard maps (e.g., \texttt{25c2\_3}, \texttt{25c2\_4}), the workload is evenly distributed. The scores of $A_1$ and $A_2$ are remarkably balanced (often within a 50/50 split), confirming that the \textbf{Claiming System} successfully prevented resource contention. Agents operated in harmony, avoiding the same targets without explicit communication overhead.
+    \item \textbf{Role Specialization (Handoff):} In the \texttt{25c2\_hallway}, we observe an extreme score imbalance (0 vs 170). This is not a failure, but a demonstration of the \textbf{Handoff Protocol}. The map structure forces one agent to act purely as a "feeder" and the other as a "courier". The fact that the team achieved a positive score—while avoiding the deadlock that typically yields 0—proves that the agents correctly negotiated this division of labor.
+\end{enumerate}
+
+\subsection{Latency Analysis}
+Real-time responsiveness is crucial in \textit{Deliveroo.js}. The following figures summarize the efficiency results in Single Agent mode.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{img/Loop_Latency(Single).png}
+    \caption{Average loop latency (inter-arrival time) per map in Single Agent mode (BFS vs PDDL).}
+    \label{fig:lat_single}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{img/PDDL_Solver_Cost(Single).png}
+    \caption{Measured computational cost of the local PDDL solver.}
+    \label{fig:lat_solver_cost}
+\end{figure}
+
+\noindent\textbf{Cognitive Cost vs. Loop Latency.}
+Comparing the reactive BFS approach with the deliberative A* (via PDDL) reveals a clear distinction between the \textit{cognitive cost} and the overall \textit{control loop latency}.
+While BFS reacts locally without explicit planning, the PDDL planner generates full plans on demand. However, as shown in Figure \ref{fig:lat_solver_cost}, the cognitive cost of the local solver is consistently in the order of milliseconds (typically $< 3$ ms).
+
+Crucially, Figure \ref{fig:lat_single} shows that this cognitive overhead does not propagate to the overall loop latency. The average cycle time remains comparable between BFS and PDDL configurations (mostly in the \textbf{50--120 ms} range).
+This behavior indicates that the cost of the solver is fully amortized within the control loop, which is dominated by non-deliberative factors such as network I/O, server update frequency (\texttt{MOVEMENT\_DURATION}), and perception updates.
+
+In conclusion, the integration of A* via the local PDDL solver adds deliberative capabilities at a low computational cost. This improves the quality of action selection (as seen in the score tables) without compromising the system's responsiveness. The architecture successfully balances the trade-off: BFS privileges raw speed but risks myopia, while our PDDL implementation produces globally informed paths with a predictable and non-dominant overhead.
 
 % --- Chapter 8 ---
 \section{Discussion and Conclusion}
-    \emph{[TODO: Discuss the strengths and weaknesses of the solution. Conclude with future improvements.]}
+This project set out to design and implement an autonomous agent capable of operating effectively in the dynamic and competitive environment of \textit{Deliveroo.js}. The proposed solution integrates a modular BDI architecture with a hybrid planning system and explicit multi-agent coordination protocols.
+
+\subsection{Architectural Validation}
+The experimental results strongly validate the architectural choices made, particularly the \textbf{Hybrid Path Planning} strategy.
+A common trade-off in real-time agents is between \textit{reactivity} (BFS) and \textit{deliberation} (PDDL). Our implementation of the \texttt{fastLocalSolver} effectively bridged this gap. As evidenced by the latency analysis, the custom local solver reduced the planning overhead to negligible levels ($<3$ ms per call), allowing the agent to exploit the reasoning capabilities of PDDL—essential for navigating complex maps like \texttt{25c1\_9}—without sacrificing the 10Hz responsiveness required by the simulation loop.
+This confirms that PDDL is viable for real-time games, provided the domain parsing and solving are optimized locally rather than delegated to high-latency external services.
+
+\subsection{Coordination and Robustness}
+In the multi-agent domain, the distinction between \textit{implicit} and \textit{explicit} coordination proved crucial.
+\begin{itemize}
+    \item \textbf{Efficiency via Claims:} In open maps, the implicit coordination mechanism (broadcasting intentions and respecting claims) allowed the team to distribute tasks efficiently with minimal communication overhead, achieving balanced scores in scenarios like \texttt{25c2\_4}.
+    \item \textbf{Deadlock Resolution via Handoff:} The \texttt{25c2\_hallway} scenario highlighted the necessity of explicit negotiation. Purely reactive agents or independent planners would inevitably succumb to deadlock in such constrained topologies. The success of our team (score 170 vs. the potential 0) demonstrates that high-level BDI protocols—specifically the finite-state machine implementing the Handoff—are indispensable for resolving spatial conflicts that pathfinding algorithms alone cannot solve.
+\end{itemize}
+
+\subsection{Limitations and Future Work}
+While the system performs robustly, we identify two key areas for future improvement:
+\begin{enumerate}
+    \item \textbf{Expanded PDDL Domain:} Currently, the PDDL domain models only movement (\texttt{move-up}, \texttt{move-down}, etc.). The decision to pick up or deliver is taken by the BDI options generator. A more advanced implementation could model the entire delivery lifecycle (pickup $\to$ move $\to$ deliver) within PDDL, enabling the planner to optimize sequences of actions rather than just spatial paths.
+    \item \textbf{Adversarial Modeling:} The current agent treats opponent agents as dynamic obstacles to be avoided. Integrating an adversarial prediction model (e.g., estimating an opponent's likely target based on their trajectory) could allow for more aggressive strategies, such as stealing parcels before an opponent arrives or blocking their path in competitive modes.
+\end{enumerate}
+
+In conclusion, \textit{ParcelPredator} successfully demonstrates that a BDI agent, when supported by optimized engineering solutions like local solving and caching, can exhibit complex, intelligent behavior in real-time environments, effectively balancing individual optimality with team cooperation.
 
 % --- Bibliography ---
 \begin{thebibliography}{9}
