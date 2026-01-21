@@ -1,7 +1,6 @@
 # ParcelPredator 🦁
 
 **Advanced BDI Multi-Agent for Dynamic Parcel Delivery**  
-*Autonomous Software Agents - University of Trento, 2025-2026*
 
 [![Node.js](https://img.shields.io/badge/Node.js-1B5E20?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![JavaScript](https://img.shields.io/badge/JavaScript-1565C0?style=flat-square&logo=javascript&logoColor=white)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
