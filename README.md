@@ -1,75 +1,72 @@
 # ParcelPredator
 
-## Purpose
-- Implement BDI agents for the Deliveroo.js simulator to pick up and deliver parcels reliably under dynamic conditions (moving agents, spawners, time-decaying rewards).
+ParcelPredator is a BDI-style autonomous agent (single or dual) for the Deliveroo.js simulator. The goal is to reliably pick up and deliver parcels in a dynamic grid world (moving agents, spawners, time-decaying rewards), using fast local planning plus coordination to reduce contention.
 
-## Goals
-- Provide a working single-agent prototype (Part 1) and a roadmap to extend it to coordinated multi-agent behavior (Part 2).
+## What you get
 
-## Scope and tasks
+### Single-agent mode
+- Belief store with aging/expiry and simple cooldowns (avoid bad targets / empty tiles).
+- Fast movement planning (PDDL-based with a local A* solver by default, or BFS fallback).
+- Greedy parcel selection and opportunistic pickup/putdown to maximize throughput.
 
-### Part 1 — Single-agent prototype (implemented)
-- **Belief management**: timestamp-based world model with time-decayed reward estimation; cooldown API (`parcel`/`tile`/`delivery`) for temporary target exclusion; auto-expiry of stale parcels (>2s) and agents (>500ms).
-- **PDDL planning**: local fast A* solver (~1-9ms on 60×60 maps) with online fallback; domain.pddl with move actions; `PDDLMove` executor with micro-retry (1 attempt per step) and macro-retry (3 attempts with exponential backoff).
-- **Greedy multi-pick routing**: scores routes by (expected reward − movement cost − contention penalty); contention based on other agents' proximity and velocity towards parcels; handles carried state for multi-pick sequences.
-- **Opportunistic actions**: during PDDLMove execution, agent performs pickup at any tile with free parcels and putdown at any delivery tile, maximizing throughput without replanning.
-- **Anti-loop mechanisms**: stochastic escape (15% probability to jump to distant spawner) breaks local cycles; area backoff (Manhattan radius 2, 3s cooldown) prevents adjacent-tile bouncing; tile cooldown (3s) on empty explores.
-- **Robustness**: GoPickUp treats missing parcels as success (already picked); GoDeliver treats `carried==0` as success (opportunistic putdown occurred); macro-retry with exponential backoff on failures; per-target cooldowns prevent infinite loops.
-- **Validation**: tested on maps ranging 20×20 (214 spawners) to 60×60 (2609 spawners); confirmed anti-loop mechanisms work, opportunistic actions increase throughput, logs clean and interpretable.
+### Dual-agent mode
+- Lightweight communication layer (handshake + periodic delta sync).
+- Claim/intent-based coordination to reduce conflicts (TTL claims + tie-break rules).
+- Simple collision/deadlock resolution protocol (move / take / drop / end).
 
-### Part 2 — Multi-agent extension (implemented)
-- **Communication scaffold:** handshake-based friend discovery, `INFO_PARCELS` / `INFO_PARCELS_DELTA`, `INFO_AGENTS` / `INFO_AGENTS_DELTA`, `INTENTION` and `COLLISION` message types. Implements diff-only sync with periodic full snapshots.
-- **Handshake & readiness:** automatic friendId discovery and handshake protocol; `Comm.isReady()` gating before sending coordination messages.
-- **Claim-based coordination:** reservation/claim API (`registerClaim`, `getClaims`, `clearMyClaim`) with 3s TTL; `shouldYieldClaim()` implements priority rules (higher score wins, tie-breaker by lexicographic `agentId`).
-- **Intent sharing & negotiation:** agents send intentions (`sendIntention`) before committing to pickup; incoming intentions are registered as claims to avoid contention.
-- **Claim-before-pickup:** `optionsGeneration()` checks `shouldYieldClaim()` before claiming a parcel; if proceeding, the agent registers the claim locally and broadcasts it to the friend, then pushes the `go_pick_up` intention.
-- **Collision protocol:** simple exchange messages (`COLLISION`, `MOVE`, `TAKE`, `DROP`, `END`) and handlers to coordinate ad-hoc parcel handoffs or temporary moves to resolve deadlocks.
-- **Defensive consistency measures:** multiple layers to avoid position overwrites — sender excludes self from agents broadcasts, receiver sanitizes incoming agent lists/deltas, and `belief.syncAgents(..., myId)` skips updating our own entry.
-- **Grid-consistent positions:** agent positions are rounded for grid logic (prevents transient fractional-position artefacts) and options generation avoids creating new intentions while the agent is mid-move.
-- **Throttled logging & comm summaries:** periodic condensed communication summaries to avoid console flooding.
+## Quick test (end-to-end)
 
-## Repository layout (key files)
-- `src/launcher.js` — agent bootstrap and adapter wiring
-- `src/bdi/belief.js` — belief store and aging/expiry logic
-- `src/bdi/options.js` — option generation, greedy route, scoring
-- `src/bdi/plans/moveBfs.js` — BFS movement and recovery/backoff
-- `src/bdi/plans/goPickUp.js` — pickup plan and belief updates
-- `src/bdi/plans/goDeliver.js` — delivery plan and belief updates
-- `src/utils/grid.js` — `bfsPath` with optional blocked-cells parameter
-
-## Current status
-- Implemented (prototype): belief aging, multi-pick scoring, agent-aware BFS, exponential backoff, target cooldown, spawner backoff, `carried_parcels` handling, immediate belief updates after actions.
-- Pending (recommended next steps): alternate-route fallback in `moveBfs`, unit tests and benchmark harness, hyperparameter tuning.
-
-## Quick Start
-
-- Install dependencies:
-
+### 1) Run the Deliveroo.js server
+If you don't have it yet:
 ```bash
+git clone https://github.com/unitn-ASA/Deliveroo.js.git
+```
+Then start the server:
+```bash
+cd Deliveroo.js
+npm install
+npm start
+```
+
+### 2) Get one (or two) tokens
+Open the Deliveroo UI and log in. Tokens are stored by the frontend in the browser (Local Storage key `myTokens`) and can be copied from there.
+
+### 3) Configure ParcelPredator
+Edit `src/config/default.js`:
+- `host`: server URL (default `http://localhost:8080`)
+- `token`: agent 1 token
+- `token2`: agent 2 token (only for dual mode)
+- `DUAL`: `false` for single-agent, `true` for dual-agent
+
+### 4) Run the agent(s)
+Install dependencies:
+```bash
+cd ParcelPredator
 npm install
 ```
 
-- (Optional) To use the online PDDL solver instead of the local A* solver, install the client and set the solver in `src/config/default.js`:
-
-```bash
-npm install @unitn-asa/pddl-client
-```
-
-Then edit `src/config/default.js` and set:
-
-```js
-	// PDDL Planning options
-	usePddl: true,        // enable PDDL-based movement
-	solver: "online"     // "local" = built-in A* | "online" = @unitn-asa/pddl-client
-```
-
-- Start the agent:
-
+Run single-agent:
 ```bash
 npm start
 ```
 
-- Quick notes:
-	- `solver: "local"` uses the lightweight internal A* (`src/PDDL/fastLocalSolver.js`).
-	- `solver: "online"` calls `@unitn-asa/pddl-client` at runtime; ensure the package is installed and the host has network access if required.
-	- Logs show `PDDLMove: Using online solver...` or `PDDLMove: Using local solver...` depending on selection.
+Run dual-agent (two terminals):
+```bash
+npm run start:agent1
+```
+```bash
+npm run start:agent2
+```
+
+## Planner selection (optional)
+- Default is local PDDL movement (`usePddl: true`, `solver: "local"`).
+- To use the online PDDL solver, install the optional dependency and set `solver: "online"` in `src/config/default.js`:
+```bash
+npm install @unitn-asa/pddl-client
+```
+
+## Repo map (entry points)
+- `src/launcher.js` — process entry point (agent1/agent2 via CLI)
+- `src/config/default.js` — host/tokens + single vs dual switch
+- `src/bdi/` — beliefs, options, intentions, plans
+- `src/PDDL/` — local planning utilities
