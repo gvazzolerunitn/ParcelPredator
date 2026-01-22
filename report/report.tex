@@ -126,7 +126,7 @@ These characteristics make \textit{Deliveroo.js} an ideal testbed for implementi
 The primary objective of this project is to develop a robust agent capable of maximizing the delivery score in both single-agent and cooperative multi-agent settings. Specifically, the contributions of this work, implemented on top of the provided Node.js/Socket.IO skeleton, are:
 
 \begin{itemize}
-    \item \textbf{BDI Architecture Implementation:} Development of a full BDI loop that manages belief revision (handling stale data for parcels and agents) and generates options based on a dynamic utility function that considers reward decay and contention penalty.
+    \item \textbf{BDI Architecture Implementation:} Development of a full BDI loop that manages belief revision (handling old data for parcels and agents) and generates options based on a dynamic utility function that considers reward decay and contention penalty.
     
     \item \textbf{Hybrid Path Planning:} Integration of a navigation system that alternates between a standard Breadth-First Search (BFS) and a PDDL-based approach. The latter is powered by a custom high-performance local A* solver (`fastLocalSolver.js`) that processes PDDL problem definitions to ensure compliance with the planning requirements while minimizing latency.
     
@@ -150,7 +150,7 @@ The system is organized into the following high-level modules, orchestrating the
 \begin{itemize}
     \item \textbf{Agent Core (`src/bdi/agent.js`):} This module represents the agent entity. It maintains the main control loop (`me.loop()`), manages the intention queue, and holds the state for coordination protocols (e.g., handoff status).
     
-    \item \textbf{Belief Model (`src/bdi/belief.js`):} Act as the agent's memory, storing the current state of the environment (parcels, agents, map configuration) and managing the expiration of stale data.
+    \item \textbf{Belief Model (`src/bdi/belief.js`):} Act as the agent's memory, storing the current state of the environment (parcels, agents, map configuration) and managing the expiration of old data.
     
     \item \textbf{Deliberation (`src/bdi/options.js`):} Responsible for the "Desire" and "Intention" phases. It evaluates the current beliefs to generate candidate goals (e.g., picking up a parcel vs. exploring) and selects the best course of action based on a utility scoring function.
     
@@ -177,7 +177,7 @@ The agent maintains a dynamic representation of the world, updated in real-time 
     
     \item \textbf{Operational Metadata:} 
     \begin{itemize}
-        \item \textbf{Claims:} A registry of intentions broadcasted by the partner agent. These have a Time-To-Live (TTL) of 3 seconds to avoid stale locks on parcels.
+        \item \textbf{Claims:} A registry of intentions broadcasted by the partner agent. These have a Time-To-Live (TTL) of 3 seconds to avoid old locks on parcels.
         \item \textbf{Cooldowns:} A mechanism to temporarily ignore specific parcels or tiles (e.g., after a failed pickup attempt), preventing the agent from getting stuck in loops.
     \end{itemize}
 \end{itemize}
@@ -190,7 +190,7 @@ The core logic of the \textit{ParcelPredator} agent relies on a robust implement
 The agent maintains a local model of the environment that is continuously synchronized with the server's state. To handle the dynamic and partially observable nature of the game, a set of specific revision rules is applied in the \texttt{Belief} module:
 
 \begin{itemize}
-    \item \textbf{Information Decay:} Perception is event-driven. To prevent the agent from acting on stale data, beliefs about parcels and other agents include a timestamp. Parcels not sensed for over 2 seconds or whose reward has decayed to zero are automatically removed from memory. Similarly, agents not seen for 5 seconds are discarded.
+    \item \textbf{Information Decay:} Perception is event-driven. To prevent the agent from acting on old data, beliefs about parcels and other agents include a timestamp. Parcels not sensed for over 2 seconds or whose reward has decayed to zero are automatically removed from memory. Similarly, agents not seen for 5 seconds are discarded.
     
     \item \textbf{Cooldown Mechanism:} A critical component for robustness is the "cooldown" system. If a target (parcel or tile) proves unreachable or an action fails repeatedly, the specific ID or coordinate is added to a cooldown list (typically for 2-10 seconds). This prevents the agent from entering infinite loops or persistently chasing inaccessible resources.
 \end{itemize}
