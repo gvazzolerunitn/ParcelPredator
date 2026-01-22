@@ -27,7 +27,7 @@ ParcelPredator deploys intelligent BDI-style agents (single or dual-mode) in the
 - Claim/intent-based coordination to reduce conflicts (TTL claims + tie-break rules).
 - Simple collision/deadlock resolution protocol (move / take / drop / end).
 
-**Note:** This project requires Node.js (I used Node 22). Ensure Node and `npm` are installed before following the quick test.
+**Note:** this project requires Node.js (I used version 22). Ensure `node` and `npm` are installed before following the quick test.
 
 ## Quick test (end-to-end)
 
