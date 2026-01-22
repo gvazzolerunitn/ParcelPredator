@@ -27,6 +27,8 @@ ParcelPredator deploys intelligent BDI-style agents (single or dual-mode) in the
 - Claim/intent-based coordination to reduce conflicts (TTL claims + tie-break rules).
 - Simple collision/deadlock resolution protocol (move / take / drop / end).
 
+**Note:** This project requires Node.js (I used Node 22). Ensure Node and `npm` are installed before following the quick test.
+
 ## Quick test (end-to-end)
 
 ### 1) Run the Deliveroo.js server
@@ -88,3 +90,14 @@ npm install @unitn-asa/pddl-client
 - `src/config/default.js` — host/tokens + single vs dual switch
 - `src/bdi/` — beliefs, options, intentions, plans
 - `src/PDDL/` — local planning utilities
+
+## Prerequisiti
+
+- **Node.js**: è necessario avere Node.js installato. Si raccomanda una versione LTS moderna (ad es. **Node.js >= 16**). Versioni più vecchie (>=14) possono funzionare ma non sono consigliate.
+- **npm**: incluso con Node.js, necessario per installare le dipendenze (`npm install`).
+
+Per verificare le versioni installate:
+```bash
+node -v
+npm -v
+```
