@@ -12,9 +12,9 @@ const agentLabel = isSecondAgent ? 'Agent2' : 'Agent1';
 
 defaultLogger.info(`[CONTEXT] Starting as ${agentLabel}`);
 
-// MODIFICA: Usiamo direttamente config.host e il token.
-// Nessun parametro "?name=" viene aggiunto.
-// Il server identificherà l'agente ESCLUSIVAMENTE tramite il token passato.
+// Use config.host and the token directly.
+// No "?name=" parameter is added.
+// The server identifies the agent exclusively by the provided token.
 const client = new DeliverooApi(config.host, token);
 
 export { client, isSecondAgent, agentLabel };

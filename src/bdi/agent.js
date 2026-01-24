@@ -8,15 +8,15 @@ class Agent {
     this.y = undefined;
     this.score = 0;
     this.carried = 0;
-    this.carriedReward = 0;       // Somma reward dei pacchi trasportati
+    this.carriedReward = 0;       // Total reward of carried parcels
     this.intentions = [];
-    // Riferimenti esterni impostati dal launcher
+    // External references set by launcher
     this.belief = null;
     this.grid = null;
     this.optionsGeneration = null;
-    // Parametri per scoring multi-pick
-    this.capacity = 4;            // Numero max pacchi trasportabili
-    this.lossForMovement = 0;     // Perdita reward per movimento (calcolato da config server)
+    // Scoring parameters for multi-pick
+    this.capacity = 4;            // Max parcels carried
+    this.lossForMovement = 0;     // Reward loss per move (from server config)
     // Multi-agent coordination
     this.friendId = null;         // ID of collaborative friend agent
     this.isSecondAgent = false;   // true if this is agent 2
@@ -97,7 +97,7 @@ class Agent {
   }
 
   async loop() {
-    // Aspetta che l'agente abbia ricevuto la propria posizione dal server
+    // Wait until the agent receives its initial position from the server
     while (this.x === undefined) {
       await new Promise(res => setTimeout(res, 100));
     }
@@ -107,7 +107,7 @@ class Agent {
         await new Promise(res => setTimeout(res, 50));
         continue;
       }
-      // Se idle, genera nuove opzioni
+      // If idle, generate new options
       if (this.intentions.length === 0 && this.optionsGeneration) {
         this.optionsGeneration({
           me: this,

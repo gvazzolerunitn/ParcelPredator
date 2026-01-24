@@ -1,4 +1,4 @@
-// Grid con BFS reale e distanza Manhattan
+// Grid with BFS pathfinding and Manhattan distance
 class Grid {
   constructor(width, height, tiles) {
     this.width = width;
@@ -6,7 +6,7 @@ class Grid {
     this.accessible = Array.from({ length: width }, () => Array(height).fill(false));
     if (tiles) {
       for (const t of tiles) {
-        // type "0" o 0 = wall; altri accessibili
+        // type "0" or 0 = wall; others are accessible
         this.accessible[t.x][t.y] = t.type != 0 && t.type !== '0';
       }
     }
@@ -22,12 +22,12 @@ class Grid {
   }
 
   /**
-   * BFS pathfinding con supporto per celle bloccate (agenti)
+  * BFS pathfinding with support for blocked cells (agents)
    * @param {number} sx - start x
    * @param {number} sy - start y
    * @param {number} tx - target x
    * @param {number} ty - target y
-   * @param {Set<string>} blockedCells - opzionale, set di "x,y" da evitare (posizioni agenti)
+  * @param {Set<string>} blockedCells - optional, set of "x,y" to avoid (agent positions)
    */
   bfsPath(sx, sy, tx, ty, blockedCells = null) {
     sx = Math.round(sx); sy = Math.round(sy); tx = Math.round(tx); ty = Math.round(ty);
@@ -45,14 +45,14 @@ class Grid {
         const nx = x+dx, ny = y+dy;
         const k = key(nx,ny);
         if (!this.isAccessible(nx,ny) || prev.has(k)) continue;
-        // Evita celle bloccate da agenti (ma permetti la destinazione)
+        // Avoid cells blocked by agents (but allow the destination)
         if (blockedCells && blockedCells.has(k) && !(nx === tx && ny === ty)) continue;
         prev.set(k, [x,y,name]);
         q.push([nx,ny]);
       }
     }
     if (!prev.has(key(tx,ty))) return null;
-    // Ricostruisci percorso di direzioni
+    // Reconstruct path directions
     const path = [];
     let cur = [tx,ty];
     while (cur) {
@@ -78,7 +78,7 @@ class Grid {
   }
 }
 
-// Singleton di comodo (sovrascritto dal launcher quando arriva la mappa)
+// Convenience singleton (overwritten by launcher when the map arrives)
 let grid = new Grid(0,0);
 export { Grid, grid };
 export function setGrid(g) { grid = g; }

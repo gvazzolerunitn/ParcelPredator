@@ -19,7 +19,7 @@ class ThrottledLogger {
   warn(...args) { console.warn(this._format(args)); }
   error(...args) { console.error(this._format(args)); }
   debug(...args) { 
-    // Ora controlla SIA la variabile d'ambiente (terminale) SIA il file config
+    // Check both the environment variable and the config file
     if (process.env.DEBUG || config.DEBUG) {
       console.log(this._format(args)); 
     }

@@ -3,7 +3,7 @@ import { grid } from "../../utils/grid.js";
 import { ConflictDetectedError } from "../errors.js";
 
 // ============================================================================
-// CONFIGURAZIONE RETRY E BACKOFF
+// RETRY AND BACKOFF CONFIGURATION
 // ============================================================================
 const MAX_RETRIES = 4;
 const BASE_DELAY_MS = 100;
@@ -16,14 +16,14 @@ const DIR_TO_DELTA = {
 };
 
 // ============================================================================
-// TARGET COOLDOWN: evita di riprovare lo stesso target subito dopo fallimenti
+// TARGET COOLDOWN: avoid retrying the same target right after failures
 // ============================================================================
 const targetCooldown = new Map(); // key: "x,y" -> { until: timestamp, failures: count }
 const COOLDOWN_BASE_MS = 2000;
 const MAX_COOLDOWN_MS = 10000;
 
 /**
- * Verifica se un target è in cooldown
+ * Check whether a target is on cooldown
  */
 export function isTargetInCooldown(x, y) {
   const key = `${Math.round(x)},${Math.round(y)}`;
@@ -37,20 +37,20 @@ export function isTargetInCooldown(x, y) {
 }
 
 /**
- * Registra un fallimento per un target, aumentando il cooldown
+ * Record a target failure and increase cooldown
  */
 function markTargetFailed(x, y) {
   const key = `${Math.round(x)},${Math.round(y)}`;
   const entry = targetCooldown.get(key) || { until: 0, failures: 0 };
   entry.failures++;
-  // Cooldown esponenziale: 2s, 4s, 8s, max 10s
+  // Exponential cooldown: 2s, 4s, 8s, max 10s
   const cooldownMs = Math.min(COOLDOWN_BASE_MS * Math.pow(2, entry.failures - 1), MAX_COOLDOWN_MS);
   entry.until = Date.now() + cooldownMs;
   targetCooldown.set(key, entry);
 }
 
 /**
- * Resetta il cooldown di un target (quando ci arriviamo con successo)
+ * Clear target cooldown on success
  */
 function clearTargetCooldown(x, y) {
   const key = `${Math.round(x)},${Math.round(y)}`;
@@ -58,7 +58,7 @@ function clearTargetCooldown(x, y) {
 }
 
 /**
- * Costruisce un set di celle bloccate dalle posizioni degli agenti
+ * Build a set of blocked cells from agent positions
  * Includes friend's destination to avoid path collision
  */
 function getBlockedCells(belief, myId, friendId = null) {
@@ -87,11 +87,11 @@ class MoveBfs {
   stop() { this.stopped = true; }
   
   /**
-   * Esegue movimento BFS verso (x, y)
-   * @param {string} _desire - tipo di desiderio (ignorato)
+   * Execute BFS movement toward (x, y)
+   * @param {string} _desire - desire type (ignored)
    * @param {number} x - target x
    * @param {number} y - target y
-   * @param {object} belief - opzionale, belief per agent-aware pathfinding
+   * @param {object} belief - optional belief for agent-aware pathfinding
    */
   async execute(_desire, x, y, belief = null) {
     const tx = Math.round(x); 
@@ -106,16 +106,16 @@ class MoveBfs {
       let curX = sx;
       let curY = sy;
       
-      // Già arrivato
+      // Already at target
       if (sx === tx && sy === ty) {
         clearTargetCooldown(tx, ty);
         return true;
       }
       
-      // Ottieni celle bloccate da altri agenti (include friend's destination)
+      // Get cells blocked by other agents (includes friend's destination)
       const blockedCells = belief ? getBlockedCells(belief, this.parent.id, this.parent.friendId) : null;
       
-      // Prova prima con agent-aware path, poi fallback a path normale
+      // Try agent-aware path first, then fall back to normal path
       let path = blockedCells ? grid.bfsPath(sx, sy, tx, ty, blockedCells) : null;
       if (!path || path.length === 0) {
         path = grid.bfsPath(sx, sy, tx, ty);
@@ -130,21 +130,21 @@ class MoveBfs {
         const next = this._nextCell(curX, curY, dir);
         const ok = await adapter.move(dir);
         
-        // emitMove ritorna {x,y} se successo, false se bloccato
-        // Verifichiamo con !ok per catturare false, undefined, null
+        // emitMove returns {x,y} on success, false if blocked
+        // Use !ok to catch false, undefined, or null
         if (!ok) {
           if (this._isFriendBlocking(next, belief)) {
             const started = await this._triggerCoordination(next);
             throw new ConflictDetectedError(started ? "handoff_immediate_exit" : "blocked by friend");
           }
-          // Movimento bloccato: exponential backoff e riprova
+          // Movement blocked: exponential backoff and retry
           blocked = true;
           retries++;
           if (retries < MAX_RETRIES) {
             const delay = BASE_DELAY_MS * Math.pow(2, retries - 1);
             await new Promise(r => setTimeout(r, delay));
           }
-          break; // Esci dal for per ricalcolare il path
+          break; // Exit loop to recompute path
         }
         curX = next.x;
         curY = next.y;
@@ -152,11 +152,11 @@ class MoveBfs {
       
       if (!blocked) {
         clearTargetCooldown(tx, ty);
-        return true; // Percorso completato con successo
+        return true; // Path completed successfully
       }
     }
     
-    // Dopo MAX_RETRIES, registra fallimento e lancia errore
+    // After MAX_RETRIES, record failure and throw
     markTargetFailed(tx, ty);
     throw new Error("move blocked after retries");
   }
