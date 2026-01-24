@@ -378,6 +378,8 @@ The tests were executed on a local instance of the \textit{Deliveroo.js} server 
     \item \textbf{Dual Agent Mode:} Maps \texttt{25c2\_1} to \texttt{25c2\_7} plus the \texttt{25c2\_hallway}, testing the team coordination protocols.
 \end{itemize}
 
+\noindent For completeness, the online PDDL solver was also tested. While functionally correct, it introduced a noticeably higher planning latency compared to the local solver, so it was not used in the main benchmarks.
+
 \subsubsection*{Impact of Map Configurations}
 To correctly interpret the results, it is crucial to note that each scenario is governed by specific runtime settings that significantly influence throughput and achievable scores: specifically \texttt{PARCEL\_REWARD\_AVG}, \texttt{MOVEMENT\_DURATION}, and the map topology.
 For instance:
@@ -488,6 +490,8 @@ In the multi-agent domain, the distinction between \textit{implicit} and \textit
     \item \textbf{Efficiency via Claims:} In open maps, the implicit coordination mechanism (broadcasting intentions and respecting claims) allowed the team to distribute tasks efficiently with minimal communication overhead, achieving balanced scores in scenarios like \texttt{25c2\_4}.
     \item \textbf{Deadlock Resolution via Handoff:} The \texttt{25c2\_hallway} scenario highlighted the necessity of explicit negotiation. Purely reactive agents or independent planners would inevitably succumb to deadlock in such constrained topologies. The success of our team (score 170 vs. the potential 0) demonstrates that high-level BDI protocols—specifically the finite-state machine implementing the Handoff—are indispensable for resolving spatial conflicts that pathfinding algorithms alone cannot solve.
 \end{itemize}
+
+\noindent The online PDDL solver was also validated during development; although it produced valid plans, its network latency was significantly higher than the local solver, which would degrade real-time responsiveness.
 
 \subsection{Limitations and Future Work}
 While the system performs robustly, we identify two key areas for future improvement:
