@@ -156,8 +156,8 @@ The system is organized into the following high-level modules, orchestrating the
     
     \item \textbf{Planning \& Execution (`src/bdi/plans/`):} Contains the procedural knowledge. The agent uses plans like \texttt{GoPickUp} and \texttt{GoDeliver} to achieve goals. Movement is handled by a hybrid approach:
     \begin{itemize}
-        \item \texttt{MoveBfs.js}: A standard Breadth-First Search for simple pathfinding.
-        \item \texttt{PDDLMove.js}: A PDDL-based planner utilizing a custom \texttt{fastLocalSolver.js} (an optimized local A* solver) to handle domain-specific movement constraints.
+        \item \texttt{moveBfs.js}: A standard Breadth-First Search for simple pathfinding.
+        \item \texttt{pddlMove.js}: A PDDL-based planner utilizing a custom \texttt{fastLocalSolver.js} (an optimized local A* solver) to handle domain-specific movement constraints.
     \end{itemize}
     
     \item \textbf{Communication (`src/bdi/comm.js`):} Handles multi-agent interactions, including the initial handshake, intention sharing (claims), and the handoff protocol for conflict resolution.
