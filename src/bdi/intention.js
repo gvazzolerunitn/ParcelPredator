@@ -1,4 +1,4 @@
-// Intention: associa un predicato a un piano e lo esegue
+// Intention: binds a predicate to a plan and executes it
 import { plans } from "./plans/index.js";
 
 class Intention {

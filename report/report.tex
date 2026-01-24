@@ -5,7 +5,7 @@
 \usepackage[T1]{fontenc}
 \usepackage[english]{babel}
 \usepackage{geometry}
-\usepackage{graphicx} % Fondamentale per il logo
+\usepackage{graphicx} % Essential for the logo
 \usepackage{amsmath, amssymb}
 \usepackage{booktabs}
 \usepackage{float}
@@ -54,52 +54,52 @@
     \onecolumn
     \centering
     
-    % --- INTESTAZIONE ---
-    \vspace*{1cm} % Margine superiore visivo
+    % --- HEADER ---
+    \vspace*{1cm} % Visual top margin
     
     {\scshape\LARGE University of Trento \par}
     
-    \vspace{1.5cm} % Spazio fisso per separare l'istituzione dal logo
+    \vspace{1.5cm} % Fixed spacing between institution and logo
     
-    % Logo: Inserito direttamente senza ambiente figure
-    % width=0.35\textwidth è spesso il "golden ratio" visivo per i loghi verticali/quadrati
+    % Logo: inserted directly without a figure environment
+    % width=0.35\textwidth is a good visual ratio for vertical/square logos
     \includegraphics[width=0.35\textwidth]{img/unitn_logo.png}
     
-    \vfill % Spazio elastico 1
+    \vfill % Flexible space 1
     
-    % --- CONTESTO ---
+    % --- CONTEXT ---
     {\scshape\Large Autonomous Software Agents \par}
     \vspace{0.5cm}
     {\large Final Project Report \par}
     
     \vspace{1cm}
     
-    % --- BLOCCO TITOLO ---
-    % Le linee orizzontali danno struttura. 
-    % Ho aggiunto un po' di "respiro" verticale dentro le linee.
+    % --- TITLE BLOCK ---
+    % Horizontal rules add structure.
+    % Added a bit of vertical breathing room between the rules.
     \hrule height 0.5pt
     \vspace{0.6cm}
     { \huge \bfseries Parcel Predator \par}
     \vspace{0.6cm}
     \hrule height 0.5pt
     
-    \vfill % Spazio elastico 2
+    \vfill % Flexible space 2
     
-    % --- AUTORE ---
+    % --- AUTHOR ---
     \emph{Author:}\\[0.5cm]
     {\Large\bfseries Gianluigi Vazzoler} \\
     \large (257846)
     
-    \vfill % Spazio elastico 3 (spinge la data in fondo)
+    \vfill % Flexible space 3 (pushes the date to the bottom)
     
-    % --- DATA (Solo Mese e Anno) ---
-    % Questo codice genera automaticamente il nome del mese in inglese + anno
+    % --- DATE (Month and Year only) ---
+    % This generates the month name in English plus year
     {\large 
     \ifcase\month\or January\or February\or March\or April\or May\or June\or July\or August\or September\or October\or November\or December\fi
     \ \number\year
     }
     
-    \vspace*{2cm} % Margine inferiore visivo
+    \vspace*{2cm} % Visual bottom margin
 \begin{center}
     \begin{minipage}{0.85\textwidth}
         \small
