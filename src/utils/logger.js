@@ -1,3 +1,5 @@
+import config from '../config/default.js';
+
 const DEFAULT_HOT_INTERVAL = 3000; // ms
 
 // Simple logger with hot-key rate-limiting and token masking
@@ -16,7 +18,12 @@ class ThrottledLogger {
   info(...args) { console.log(this._format(args)); }
   warn(...args) { console.warn(this._format(args)); }
   error(...args) { console.error(this._format(args)); }
-  debug(...args) { if (process.env.DEBUG) console.log(this._format(args)); }
+  debug(...args) { 
+    // Ora controlla SIA la variabile d'ambiente (terminale) SIA il file config
+    if (process.env.DEBUG || config.DEBUG) {
+      console.log(this._format(args)); 
+    }
+  }
 
   // Hot logging: logs at most once per `interval` per key, counting suppressed events
   hot(key, interval = DEFAULT_HOT_INTERVAL, ...args) {
