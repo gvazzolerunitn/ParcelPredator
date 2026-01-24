@@ -19,7 +19,7 @@ ParcelPredator deploys intelligent BDI-style agents (single or dual-mode) in the
 
 ### Single-agent mode
 - Belief store with aging/expiry and simple cooldowns (avoid bad targets / empty tiles).
-- Fast movement planning (PDDL-based with a local A* solver by default, or BFS fallback).
+- Fast movement planning (wither Breadth-First-Search strategy, or PDDL-based with a local A* solver).
 - Greedy parcel selection and opportunistic pickup/putdown to maximize throughput.
 
 ### Dual-agent mode
@@ -30,6 +30,7 @@ ParcelPredator deploys intelligent BDI-style agents (single or dual-mode) in the
 **Note:** this project requires Node.js (I used version 22). Ensure `node` and `npm` are installed before following the quick test.
 
 ## Quick test (end-to-end)
+**Note:** This project was developed and tested on a local Deliveroo.js server (localhost). For best results, run the server locally (default http://localhost:8080).
 
 ### 1) Run the Deliveroo.js server
 If you don't have it yet:
@@ -38,18 +39,16 @@ git clone https://github.com/unitn-ASA/Deliveroo.js.git
 ```
 Then start the server:
 ```bash
-cd Deliveroo.js
+cd Deliveroo.js/backend
 npm install
-cd backend
 npm start
 ```
 
 ### 2) Get one (or two) tokens
-Open the Deliveroo UI and log in to generate tokens, or use the tokens already stored locally in the repository.
+Two options:
 
-Tokens: generate or reuse
-- Generate via UI: open the Deliveroo web UI, log in, then copy tokens from the browser's Local Storage (`myTokens`). In Chrome/Edge: DevTools → Application → Local Storage → select site → `myTokens` entry. Tokens are plain JWT strings you can paste into `src/config/default.js`.
-- Reuse from `default.js`: for quick local testing you can keep the tokens already present in `src/config/default.js` (the repo includes `token` and `token2`).
+- Reuse tokens (recommended): for quick local testing, keep the tokens already present in `src/config/default.js` (the repo includes `token` and `token2`). This is the easiest and fastest option.
+- Generate via UI: open http://localhost:8080, log in, then copy tokens from the browser's Local Storage (`myTokens`). In Chrome/Edge: DevTools → Application → Local Storage → select site → `myTokens` entry. Tokens are plain JWT strings you can paste into `src/config/default.js`.
 
 ### 3) Configure ParcelPredator
 Edit `src/config/default.js`:
@@ -70,7 +69,7 @@ Run single-agent:
 npm start
 ```
 
-Run dual-agent (two terminals):
+Run dual-agent (two separate terminals):
 ```bash
 npm run start:agent1
 ```
@@ -79,7 +78,8 @@ npm run start:agent2
 ```
 
 ## Planner selection (optional)
-- Default is local PDDL movement (`usePddl: true`, `solver: "local"`).
+- Default is BFS movement planner (`usePddl: false`).
+- To use local PDDL movement: `usePddl: true`, `solver: "local"`.
 - To use the online PDDL solver, install the optional dependency and set `solver: "online"` in `src/config/default.js`:
 ```bash
 npm install @unitn-asa/pddl-client
