@@ -209,7 +209,7 @@ The selection of the best parcel to pick up is governed by a utility function th
 \begin{itemize}
     \item $R_{p}$ is the current reward of the parcel.
     \item $R_{carried}$ is the total reward of parcels already in the inventory (incentivizing the completion of efficient multi-parcel routes).
-    \item $Cost_{move}$ is a function of the Manhattan distance to the parcel and subsequently to the delivery zone, weighted by the agent's load factor ($loss \times (carried + 1)$).
+    \item $Cost_{move} = D_{total} \times loss \times (carried + 1)$, where $D_{total}$ is the sum of the Manhattan distance to the parcel and the distance from the parcel to the nearest delivery zone.
     \item $Penalty_{contention}$ is a dynamic multiplier ($0.1$ to $1.0$). If another agent is significantly closer to the parcel, the score is penalized to avoid wasteful races.
 \end{itemize}
 
@@ -261,8 +261,12 @@ A critical challenge in the \texttt{25c2\_hallway} scenario is the "corridor dea
 
 \begin{enumerate}
     \item \textbf{PROTOCOL\_YIELD:} The agent with fewer parcels (or furthest from delivery) initiates the sequence. It searches for an adjacent "pocket" or free tile and moves into it.
-    \item \textbf{PROTOCOL\_RELEASE:} If no pocket is available but the agent is carrying parcels needed by the other side, it drops the parcels and retreats (\texttt{PROTOCOL\_RETREAT}), signaling the partner to take over.
+    \item \textbf{PROTOCOL\_RELEASE:} If no pocket is available but the agent is carrying parcels needed by the other side, it drops the parcels and retreats, signaling the partner to take over.
     \item \textbf{PROTOCOL\_ACQUIRE:} The partner waits for the path to clear, moves to the dropped parcels, and collects them.
+    \item \textbf{PROTOCOL\_STUCK}: Triggered when yield fails (no free adjacent cell). 
+          The partner attempts to yield instead; if both fail, the protocol terminates 
+          with a randomized backoff (1-3s) to prevent repeated deadlock attempts.
+    \item \textbf{PROTOCOL\_END}: Signals protocol completion and resets coordination state.
 \end{enumerate}
 
 \noindent This mechanism transforms a potential deadlock into a cooperative relay race, essential for solving constrained maps.
